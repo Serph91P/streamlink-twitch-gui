@@ -158,6 +158,20 @@ streaming:
     retry-streams:
         title: Wiederholungsverzögerung
         description: Zeit in Sekunden zwischen jedem Versuch.
+    twitch-api-header:
+        title: Twitch OAuth Token
+        description: Browser-Authentifizierungstoken fuer vollen Qualitaetszugriff (H.265/AV1, 1440p60, werbefrei mit Turbo). Aus den Browser-Cookies auf twitch.tv extrahieren.
+        notes: "Token aus Browser-Cookie 'auth-token'. F12-Konsole auf twitch.tv oeffnen und ausfuehren: document.cookie.split('; ').find(c=>c.startsWith('auth-token='))?.split('=')[1]"
+        placeholder: Browser auth-token hier einfuegen
+    twitch-extra-codecs:
+        title: H.265 / AV1 Codecs
+        description: H.265 (HEVC) und AV1 Video-Codecs zusaetzlich zu H.264 aktivieren fuer hoehere Qualitaet bei gleicher Bitrate (Streamlink 7.0+).
+        notes: Erfordert einen Browser-OAuth-Token fuer Zugriff. Wenn aktiviert, fordert Streamlink H.264, H.265 und AV1 Streams an. Der beste verfuegbare Codec wird automatisch gewaehlt.
+        checkbox: H.265 und AV1 Codecs aktivieren
+    twitch-disable-ads:
+        title: Werbung deaktivieren
+        description: Eingebettete Twitch-Werbung waehrend Streams ueberspringen.
+        checkbox: Werbung in Streams blockieren
 player:
     preset:
         title: Player Voreinstellungen

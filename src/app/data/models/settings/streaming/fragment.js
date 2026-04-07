@@ -37,6 +37,9 @@ export default Fragment.extend({
 	stream_segment_threads: attr( "number", { defaultValue: 1, min: 1, max: 10 } ),
 	retry_open: attr( "number", { defaultValue: 1, min: 1, max: MAX } ),
 	retry_streams: attr( "number", { defaultValue: 1, min: 0, max: MAX } ),
+	twitch_api_header: attr( "string", { defaultValue: "" } ),
+	twitch_extra_codecs: attr( "boolean", { defaultValue: false } ),
+	twitch_disable_ads: attr( "boolean", { defaultValue: false } ),
 
 	providerName: computed( "provider", function() {
 		const provider = get( this, "provider" );

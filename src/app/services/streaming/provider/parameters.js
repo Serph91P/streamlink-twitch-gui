@@ -27,6 +27,20 @@ export const parameters = [
 		"stream.low_latency"
 	),
 	new Parameter(
+		"--twitch-disable-ads",
+		"stream.settings.streaming.twitch_disable_ads"
+	),
+	new Parameter(
+		"--twitch-api-header",
+		"stream.settings.streaming.twitch_api_header",
+		"stream.twitchApiHeaderValue"
+	),
+	new Parameter(
+		"--twitch-supported-codecs",
+		"stream.settings.streaming.twitch_extra_codecs",
+		"stream.twitchSupportedCodecsValue"
+	),
+	new Parameter(
 		"--webbrowser",
 		null,
 		"stream.webbrowser"

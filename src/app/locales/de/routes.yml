@@ -77,6 +77,10 @@ channel:
                 title: Streaming mit geringer Latenz
                 description: Überschreibe die globalen Einstellungen für niedrige Latenzzeiten.
                 checkbox: Streaming mit geringer Latenz aktivieren
+            codecs:
+                title: H.265 / AV1 Codecs
+                description: Globale Codec-Einstellung fuer diesen Kanal ueberschreiben.
+                checkbox: H.265 und AV1 Codecs aktivieren
             chat:
                 title: Chat
                 description: Den Chat automatisch öffnen.

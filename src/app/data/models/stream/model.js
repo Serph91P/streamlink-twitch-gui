@@ -177,6 +177,28 @@ export default Model.extend( /** @class Stream */ {
 		function() {
 			return twitchStreamUrl.replace( "{channel}", this.stream.user_login );
 		}
+	),
+
+	// Format the OAuth token as "Authorization=OAuth <token>" for --twitch-api-header
+	twitchApiHeaderValue: computed(
+		"settings.streaming.twitch_api_header",
+		/** @this {Stream} */
+		function() {
+			const token = get( this, "settings.streaming.twitch_api_header" );
+			if ( !token || !String( token ).trim() ) { return ""; }
+			return `Authorization=OAuth ${String( token ).trim()}`;
+		}
+	),
+
+	// Return codec string when extra codecs are enabled
+	twitchSupportedCodecsValue: computed(
+		"settings.streaming.twitch_extra_codecs",
+		/** @this {Stream} */
+		function() {
+			return get( this, "settings.streaming.twitch_extra_codecs" )
+				? "h264,h265,av1"
+				: "";
+		}
 	)
 
 }).reopenClass({

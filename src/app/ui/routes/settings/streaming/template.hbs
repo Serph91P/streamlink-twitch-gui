@@ -212,3 +212,45 @@
 	}}
 {{/settings-row}}
 </fieldset>
+
+<fieldset>
+{{#settings-row
+	(t "settings.streaming.twitch-api-header.title")
+	(t "settings.streaming.twitch-api-header.description")
+	icon="fa-key"
+	notes=(t "settings.streaming.twitch-api-header.notes")
+	documentation="--twitch-api-header"
+}}
+	{{input
+		type="text"
+		value=(mut model.streaming.twitch_api_header)
+		classNames="col-xs-12"
+		placeholder=(t "settings.streaming.twitch-api-header.placeholder")
+	}}
+{{/settings-row}}
+
+{{#settings-row
+	(t "settings.streaming.twitch-extra-codecs.title")
+	(t "settings.streaming.twitch-extra-codecs.description")
+	icon="fa-film"
+	notes=(t "settings.streaming.twitch-extra-codecs.notes")
+	documentation="--twitch-supported-codecs"
+}}
+	{{check-box
+		(t "settings.streaming.twitch-extra-codecs.checkbox")
+		checked=model.streaming.twitch_extra_codecs
+	}}
+{{/settings-row}}
+
+{{#settings-row
+	(t "settings.streaming.twitch-disable-ads.title")
+	(t "settings.streaming.twitch-disable-ads.description")
+	icon="fa-ban"
+	documentation="--twitch-disable-ads"
+}}
+	{{check-box
+		(t "settings.streaming.twitch-disable-ads.checkbox")
+		checked=model.streaming.twitch_disable_ads
+	}}
+{{/settings-row}}
+</fieldset>

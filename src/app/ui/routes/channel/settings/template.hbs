@@ -39,6 +39,21 @@
 {{/settings-row}}
 
 {{#settings-row
+	(t "routes.channel.settings.stream.codecs.title")
+	(t "routes.channel.settings.stream.codecs.description")
+	icon="fa-film"
+	toggle=true
+	enabled=_streaming_twitch_extra_codecs
+	documentation="--twitch-supported-codecs"
+}}
+	{{check-box
+		(t "routes.channel.settings.stream.codecs.checkbox")
+		checked=streaming_twitch_extra_codecs
+		disabled=(bool-not _streaming_twitch_extra_codecs)
+	}}
+{{/settings-row}}
+
+{{#settings-row
 	(t "routes.channel.settings.stream.chat.title")
 	(t "routes.channel.settings.stream.chat.description")
 	icon="fa-comments"

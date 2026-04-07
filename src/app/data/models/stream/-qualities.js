@@ -21,6 +21,13 @@ export default [
 		exclude: null
 	},
 
+	// 1440p60
+	{
+		id: "1440p60",
+		quality: "best,best-unfiltered",
+		exclude: ">1440p60"
+	},
+
 	// High
 	{
 		id: "high",
