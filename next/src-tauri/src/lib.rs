@@ -1,4 +1,5 @@
 pub mod domain;
+pub mod streamlink;
 
 #[cfg(feature = "desktop")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
