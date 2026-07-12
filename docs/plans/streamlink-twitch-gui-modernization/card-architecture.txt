@@ -1,0 +1,24 @@
+Implement on the local repository only through this isolated Kanban worktree.
+
+Mandatory Git rules:
+- Fetch origin before editing.
+- Verify HEAD descends from current origin/develop. If not, stop and block with evidence.
+- Never base work on master or target master.
+- Open the pull request against develop.
+- Do not merge your own implementation PR. The dependent review card owns review and merge.
+- Do not modify files owned by another running card.
+
+Mandatory engineering rules:
+- Load karpathy-guidelines and opencode-kanban-worker.
+- Read repository rules and the plan files before editing.
+- Use Graphify output first for architecture orientation, then verify every relevant fact against source.
+- Use OpenCode as the coding worker for non-trivial code. Independently inspect its diff and run checks yourself.
+- Use TDD for behavior changes.
+- Use only current maintained dependencies and commit lockfiles.
+- Do not add Unicode em dash or en dash characters.
+- Inspect git diff and include only task-scoped files.
+- Run all task acceptance checks locally in one complete batch before push.
+- Commit in English, push the branch, open a GitHub PR against develop, and report branch, commit, PR URL, exact checks and any risk.
+
+Task-specific scope:
+Copy the verified plan directory from `/opt/data/plans/streamlink-twitch-gui-modernization/` into `docs/plans/streamlink-twitch-gui-modernization/`. Add `docs/rewrite/architecture-analysis.md` documenting the Graphify and source-verified legacy architecture, measured baseline, online sources, dependency audit, Tauri-vs-Electron-vs-Flutter decision, Streamlink 8.x compatibility findings, Twitch OAuth obligations, migration boundaries and explicit acceptance criteria. Do not implement the new app in this card. Ensure all source links have access dates and no unsupported claim is presented as fact. Verify markdown links, code fences, no Unicode dash characters and clean `git diff --check`.

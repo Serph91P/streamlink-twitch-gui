@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Streamlink support
+    about: Report Streamlink CLI and playback-engine issues to the Streamlink project.
+    url: https://github.com/streamlink/streamlink
+  - name: Project discussions
+    about: Ask usage questions and discuss ideas before opening a feature proposal.
+    url: https://github.com/Serph91P/streamlink-twitch-gui/discussions

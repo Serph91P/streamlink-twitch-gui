@@ -1,0 +1,16 @@
+valid:
+    request:
+        method: "GET"
+        url: "https://api.twitch.tv/foo"
+        query: {}
+    response:
+        data:
+            - id: "1"
+              foo: "bar"
+invalid:
+    request:
+        method: "GET"
+        url: "https://api.twitch.tv/foo"
+        query: {}
+    response:
+        data:

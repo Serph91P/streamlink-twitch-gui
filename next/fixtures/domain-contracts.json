@@ -1,0 +1,58 @@
+{
+	"settings": {
+		"schemaVersion": 1,
+		"streamlinkPath": "/usr/bin/streamlink",
+		"quality": {
+			"preference": "best",
+			"maximumHeight": 1440,
+			"maximumFps": 60
+		},
+		"codecPreference": {
+			"allowed": ["h264", "h265", "av1"],
+			"preferred": "av1"
+		},
+		"player": {
+			"path": "/usr/bin/mpv",
+			"arguments": ["--fullscreen"]
+		},
+		"theme": "dark",
+		"language": "en",
+		"notifications": {
+			"liveChannels": true,
+			"playbackErrors": true
+		},
+		"hotkey": {
+			"enabled": false,
+			"accelerator": "Ctrl+Shift+S"
+		}
+	},
+	"capabilities": {
+		"variants": [
+			{
+				"name": "1440p60-av1",
+				"resolution": { "width": 2560, "height": 1440 },
+				"fps": 60,
+				"codec": "av1",
+				"bitrateKbps": 12000,
+				"aliases": ["best"]
+			},
+			{
+				"name": "audio_only",
+				"codec": "unknown",
+				"aliases": ["audio_only", "worst"]
+			}
+		],
+		"supportsCodecSelection": true,
+		"futureStreamlinkFeature": "preserved by newer backends"
+	},
+	"session": {
+		"status": "authenticated",
+		"user": {
+			"id": "1234",
+			"login": "example_streamer",
+			"displayName": "Example Streamer",
+			"profileImageUrl": "https://static-cdn.jtvnw.net/example.png"
+		},
+		"expiresAt": "2030-01-01T00:00:00Z"
+	}
+}

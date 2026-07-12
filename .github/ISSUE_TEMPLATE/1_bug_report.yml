@@ -1,0 +1,45 @@
+name: Bug report
+description: Report reproducible behavior in the current Streamlink Twitch GUI
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Do not include tokens, cookies, signed media URLs, authorization headers, or other credentials.
+        Issues in the Streamlink CLI itself belong in the Streamlink repository.
+  - type: checkboxes
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched open and recently closed issues in this repository.
+          required: true
+        - label: I confirmed that the problem is in Streamlink Twitch GUI rather than Streamlink or the selected player.
+          required: true
+  - type: input
+    attributes:
+      label: Streamlink Twitch GUI version
+      description: Enter the release tag or commit SHA.
+      placeholder: v0.0.1
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Streamlink version
+      description: Run `streamlink --version` when the problem involves stream discovery or playback.
+      placeholder: streamlink 8.4.0
+  - type: input
+    attributes:
+      label: Operating system
+      placeholder: Windows 11 x64 or Ubuntu 24.04 amd64
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Description and reproduction steps
+      description: Explain what happened, what you expected, and the smallest reliable sequence that reproduces it.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Sanitized logs
+      description: Paste relevant text output after removing all credentials and private URLs.
+      render: text
