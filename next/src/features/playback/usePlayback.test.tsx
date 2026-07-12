@@ -1,11 +1,35 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { PlaybackBackend } from "../../api/backend";
+import { BrowserBackend, type PlaybackBackend } from "../../api/backend";
 import { usePlayback } from "./usePlayback";
 import { variants } from "./QualityPicker.test";
 
 describe("usePlayback", () => {
+  it("uses the persisted preferred codec for its initial selection", () => {
+    const backend = new BrowserBackend();
+
+    const { result } = renderHook(() =>
+      usePlayback(backend, "https://twitch.tv/signalnoise", variants, {
+        preferredCodec: "av1",
+      }),
+    );
+
+    expect(result.current.selected).toBe("1440p60-av1");
+  });
+
+  it("uses the persisted maximum height for its initial selection", () => {
+    const backend = new BrowserBackend();
+
+    const { result } = renderHook(() =>
+      usePlayback(backend, "https://twitch.tv/signalnoise", variants, {
+        maximumHeight: 1080,
+      }),
+    );
+
+    expect(result.current.selected).toBe("1080p60-h264");
+  });
+
   it("stops and relaunches when selection changes while running", async () => {
     const calls: string[] = [];
     const backend: PlaybackBackend = {

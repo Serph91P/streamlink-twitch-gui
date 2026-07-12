@@ -1,6 +1,7 @@
 :root {
-  color: #f3efe6;
-  background: #131518;
+  color: var(--paper);
+  background: var(--graphite);
+  color-scheme: dark;
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -12,6 +13,36 @@
   --violet: #9578e7;
   --coral: #ff6f61;
   --paper: #f3efe6;
+  --chrome: #17191d;
+  --input: #111316;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --graphite: #f2eee6;
+  --panel: #fffdf8;
+  --panel-raised: #e8e1d6;
+  --line: #c9c0b3;
+  --muted: #625d55;
+  --violet: #6849b8;
+  --paper: #211f1b;
+  --chrome: #e9e2d8;
+  --input: #fff;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] {
+    color-scheme: light;
+    --graphite: #f2eee6;
+    --panel: #fffdf8;
+    --panel-raised: #e8e1d6;
+    --line: #c9c0b3;
+    --muted: #625d55;
+    --violet: #6849b8;
+    --paper: #211f1b;
+    --chrome: #e9e2d8;
+    --input: #fff;
+  }
 }
 
 * {
@@ -54,7 +85,7 @@ textarea:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #17191d;
+  background: var(--chrome);
 }
 .identity {
   display: flex;
@@ -116,7 +147,7 @@ textarea:focus-visible {
   display: flex;
   gap: 0.25rem;
   overflow-x: auto;
-  background: #17191d;
+  background: var(--chrome);
 }
 .primary-nav button {
   padding: 1rem 0.9rem 0.85rem;
@@ -376,7 +407,7 @@ textarea:focus-visible {
   border: 1px solid var(--line);
   border-radius: 0;
   color: var(--paper);
-  background: #111316;
+  background: var(--input);
 }
 .search-form button,
 .primary-action {
@@ -456,7 +487,7 @@ textarea:focus-visible {
   border: 1px solid var(--line);
   display: grid;
   gap: 1rem;
-  background: #17191d;
+  background: var(--chrome);
 }
 .playback-panel h2 {
   margin: 0.35rem 0 0;

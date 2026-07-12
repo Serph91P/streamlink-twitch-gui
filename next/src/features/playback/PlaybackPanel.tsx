@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import type { PlaybackBackend } from "../../api/backend";
+import type { Settings } from "../../domain/settings";
 import { PlaybackStatus } from "./PlaybackStatus";
 import { QualityPicker } from "./QualityPicker";
 import { usePlayback } from "./usePlayback";
@@ -9,12 +10,17 @@ function Controls({
   backend,
   url,
   variants,
+  settings,
 }: {
   backend: PlaybackBackend;
   url: string;
   variants: Awaited<ReturnType<PlaybackBackend["inspectStreams"]>>["variants"];
+  settings: Settings;
 }) {
-  const playback = usePlayback(backend, url, variants);
+  const playback = usePlayback(backend, url, variants, {
+    preferredCodec: settings.codecPreference.preferred,
+    maximumHeight: settings.quality.maximumHeight,
+  });
   return (
     <section className="playback-panel" aria-labelledby="playback-heading">
       <div>
@@ -50,9 +56,11 @@ function Controls({
 export function PlaybackPanel({
   backend,
   login,
+  settings,
 }: {
   backend: PlaybackBackend;
   login: string;
+  settings: Settings;
 }) {
   const url = `https://www.twitch.tv/${encodeURIComponent(login)}`;
   const capabilities = useQuery({
@@ -87,6 +95,7 @@ export function PlaybackPanel({
       backend={backend}
       url={url}
       variants={capabilities.data.variants}
+      settings={settings}
     />
   );
 }

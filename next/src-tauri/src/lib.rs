@@ -1,3 +1,4 @@
+pub mod desktop;
 pub mod domain;
 pub mod settings;
 pub mod streamlink;
@@ -6,8 +7,6 @@ pub mod twitch;
 #[cfg(feature = "desktop")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    use std::sync::Mutex;
-
     use tauri::Manager;
 
     let twitch_state = match twitch::commands::TwitchState::new(
@@ -24,14 +23,19 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(twitch_state)
         .setup(|app| {
-            tauri::tray::TrayIconBuilder::new()
-                .tooltip("Streamlink Twitch GUI")
-                .build(app)?;
             let settings_path = app.path().app_config_dir()?.join("settings.json");
-            app.manage(settings::SettingsState(settings::SettingsStore::new(
-                settings_path,
-            )));
-            app.manage(streamlink::commands::PlaybackState(Mutex::new(None)));
+            let settings_store = settings::SettingsStore::new(settings_path);
+            let startup_settings = settings_store.load()?;
+            app.manage(settings::SettingsState(settings_store));
+            app.manage(desktop::RuntimeSettings::new(&startup_settings));
+            app.manage(streamlink::commands::PlaybackState::new());
+            desktop::apply_runtime_settings(
+                app.handle(),
+                app.state::<desktop::RuntimeSettings>().inner(),
+                &startup_settings,
+            )
+            .map_err(std::io::Error::other)?;
+            desktop::build_tray(app.handle())?;
             let runner = app
                 .state::<twitch::commands::TwitchState>()
                 .validation_runner();

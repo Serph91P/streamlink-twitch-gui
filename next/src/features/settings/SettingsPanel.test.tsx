@@ -11,7 +11,17 @@ describe("SettingsPanel", () => {
       loadSettings: async () => defaultSettings,
       saveSettings,
     });
-    render(<SettingsPanel backend={backend} />);
+    render(
+      <SettingsPanel
+        backend={backend}
+        settings={defaultSettings}
+        onSaved={() => undefined}
+      />,
+    );
+
+    expect(
+      screen.queryByLabelText("Notify when followed channels go live"),
+    ).not.toBeInTheDocument();
 
     fireEvent.change(await screen.findByLabelText("Streamlink executable"), {
       target: { value: "/usr/bin/streamlink" },

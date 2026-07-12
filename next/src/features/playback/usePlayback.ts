@@ -1,16 +1,21 @@
 import { useState } from "react";
 
 import type { PlaybackBackend } from "../../api/backend";
-import type { StreamVariant } from "../../domain/stream";
+import type { StreamCodec, StreamVariant } from "../../domain/stream";
 import { selectBestVariant } from "./QualityPicker";
 
 export function usePlayback(
   backend: PlaybackBackend,
   url: string,
   variants: StreamVariant[],
+  constraints: { preferredCodec?: StreamCodec; maximumHeight?: number } = {},
 ) {
   const [selected, setSelected] = useState(
-    () => selectBestVariant(variants)?.name,
+    () =>
+      selectBestVariant(variants, {
+        preferredCodec: constraints.preferredCodec,
+        maximumHeight: constraints.maximumHeight,
+      })?.name,
   );
   const [status, setStatus] = useState<
     "idle" | "launching" | "running" | "stopping" | "error"

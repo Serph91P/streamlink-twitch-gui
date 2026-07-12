@@ -12,6 +12,7 @@ import type {
   TwitchSearchChannel,
   TwitchStream,
 } from "../domain/twitch";
+import type { Settings } from "../domain/settings";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { PlaybackPanel } from "../features/playback/PlaybackPanel";
 
@@ -203,7 +204,13 @@ function CategoriesRoute({ backend }: { backend: AppBackend }) {
   );
 }
 
-function SearchRoute({ backend }: { backend: AppBackend }) {
+function SearchRoute({
+  backend,
+  settings,
+}: {
+  backend: AppBackend;
+  settings: Settings;
+}) {
   const [input, setInput] = useState("");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<TwitchSearchChannel>();
@@ -259,7 +266,11 @@ function SearchRoute({ backend }: { backend: AppBackend }) {
         {detail.data?.items.map((stream) => (
           <div key={stream.id} className="channel-detail">
             <StreamCard stream={stream} />
-            <PlaybackPanel backend={backend} login={stream.userLogin} />
+            <PlaybackPanel
+              backend={backend}
+              login={stream.userLogin}
+              settings={settings}
+            />
           </div>
         ))}
       </>
@@ -333,9 +344,13 @@ function SearchRoute({ backend }: { backend: AppBackend }) {
 export function BrowseRoute({
   route,
   backend,
+  settings,
+  onSettingsSaved,
 }: {
   route: RouteName;
   backend: AppBackend;
+  settings: Settings;
+  onSettingsSaved: (settings: Settings) => void;
   onNavigate: (route: RouteName) => void;
 }) {
   if (route === "live") return <LiveRoute backend={backend} />;
@@ -343,6 +358,13 @@ export function BrowseRoute({
   if (route === "channels")
     return <FollowingRoute backend={backend} channelsOnly />;
   if (route === "categories") return <CategoriesRoute backend={backend} />;
-  if (route === "search") return <SearchRoute backend={backend} />;
-  return <SettingsPanel backend={backend} />;
+  if (route === "search")
+    return <SearchRoute backend={backend} settings={settings} />;
+  return (
+    <SettingsPanel
+      backend={backend}
+      settings={settings}
+      onSaved={onSettingsSaved}
+    />
+  );
 }

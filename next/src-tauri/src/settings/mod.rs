@@ -169,9 +169,12 @@ pub fn get_settings(state: tauri::State<'_, SettingsState>) -> Result<AppSetting
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn save_settings(
+    app: tauri::AppHandle,
     state: tauri::State<'_, SettingsState>,
+    runtime: tauri::State<'_, crate::desktop::RuntimeSettings>,
     settings: AppSettings,
 ) -> Result<AppSettings, String> {
     state.0.save(&settings).map_err(|error| error.to_string())?;
+    crate::desktop::apply_runtime_settings(&app, &runtime, &settings)?;
     Ok(settings)
 }

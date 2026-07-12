@@ -3,6 +3,7 @@ use std::{path::PathBuf, sync::Mutex, time::Duration};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    desktop::{PlaybackAction, playback_action},
     domain::stream::{QualityConstraints, QualityPreference, StreamCapabilities, StreamCodec},
     settings::SettingsState,
 };
@@ -14,7 +15,25 @@ use super::{
     process::{PlaybackProcess, launch_playback},
 };
 
-pub struct PlaybackState(pub Mutex<Option<PlaybackProcess>>);
+#[derive(Clone)]
+struct PreviousPlayback {
+    executable: PathBuf,
+    arguments: Vec<String>,
+}
+
+#[derive(Default)]
+struct PlaybackRuntime {
+    active: Option<PlaybackProcess>,
+    previous: Option<PreviousPlayback>,
+}
+
+pub struct PlaybackState(Mutex<PlaybackRuntime>);
+
+impl PlaybackState {
+    pub fn new() -> Self {
+        Self(Mutex::new(PlaybackRuntime::default()))
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -54,8 +73,22 @@ pub async fn inspect_streams(
 
 #[tauri::command]
 pub fn launch_stream(
+    app: tauri::AppHandle,
     playback: tauri::State<'_, PlaybackState>,
     settings: tauri::State<'_, SettingsState>,
+    runtime: tauri::State<'_, crate::desktop::RuntimeSettings>,
+    request: LaunchRequest,
+) -> Result<PlaybackResult, String> {
+    let result = launch_stream_inner(&playback, &settings, request);
+    if let Err(error) = &result {
+        crate::desktop::notify_playback_error(&app, &runtime, error);
+    }
+    result
+}
+
+fn launch_stream_inner(
+    playback: &PlaybackState,
+    settings: &SettingsState,
     request: LaunchRequest,
 ) -> Result<PlaybackResult, String> {
     let settings = settings.0.load().map_err(|error| error.to_string())?;
@@ -81,16 +114,20 @@ pub fn launch_stream(
         playback_oauth: None,
     })
     .map_err(|error| error.to_string())?;
-    let process =
-        launch_playback(&detection.executable, arguments).map_err(|error| error.to_string())?;
+    let process = launch_playback(&detection.executable, arguments.clone())
+        .map_err(|error| error.to_string())?;
     let mut active = playback
         .0
         .lock()
         .map_err(|_| "playback state is unavailable")?;
-    if let Some(mut previous) = active.take() {
+    if let Some(mut previous) = active.active.take() {
         previous.cancel().map_err(|error| error.to_string())?;
     }
-    *active = Some(process);
+    active.active = Some(process);
+    active.previous = Some(PreviousPlayback {
+        executable: detection.executable,
+        arguments,
+    });
     Ok(PlaybackResult {
         status: "running",
         diagnostics: Vec::new(),
@@ -99,11 +136,19 @@ pub fn launch_stream(
 
 #[tauri::command]
 pub fn stop_stream(playback: tauri::State<'_, PlaybackState>) -> Result<PlaybackResult, String> {
-    let mut active = playback
+    let diagnostics = stop_playback(&playback)?;
+    Ok(PlaybackResult {
+        status: "stopped",
+        diagnostics,
+    })
+}
+
+fn stop_playback(playback: &PlaybackState) -> Result<Vec<String>, String> {
+    let mut runtime = playback
         .0
         .lock()
         .map_err(|_| "playback state is unavailable")?;
-    let diagnostics = if let Some(mut process) = active.take() {
+    let diagnostics = if let Some(mut process) = runtime.active.take() {
         process.cancel().map_err(|error| error.to_string())?;
         process
             .diagnostics()
@@ -113,8 +158,32 @@ pub fn stop_stream(playback: tauri::State<'_, PlaybackState>) -> Result<Playback
     } else {
         Vec::new()
     };
-    Ok(PlaybackResult {
-        status: "stopped",
-        diagnostics,
-    })
+    Ok(diagnostics)
+}
+
+pub fn play_or_stop(playback: &PlaybackState) -> Result<PlaybackAction, String> {
+    let mut runtime = playback
+        .0
+        .lock()
+        .map_err(|_| "playback state is unavailable")?;
+    let action = playback_action(runtime.active.is_some(), runtime.previous.is_some());
+    match action {
+        PlaybackAction::Stop => {
+            if let Some(mut process) = runtime.active.take() {
+                process.cancel().map_err(|error| error.to_string())?;
+            }
+        }
+        PlaybackAction::Replay => {
+            let previous = runtime
+                .previous
+                .clone()
+                .ok_or_else(|| "previous playback is unavailable".to_owned())?;
+            runtime.active = Some(
+                launch_playback(&previous.executable, previous.arguments)
+                    .map_err(|error| error.to_string())?,
+            );
+        }
+        PlaybackAction::ShowWindow => {}
+    }
+    Ok(action)
 }
