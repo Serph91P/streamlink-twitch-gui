@@ -32,6 +32,7 @@ pub struct PlayerConfiguration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlaybackRequest {
     pub url: String,
+    pub variant_name: Option<String>,
     pub quality: QualityConstraints,
     pub player: Option<PlayerConfiguration>,
     pub codecs: Vec<StreamCodec>,
@@ -77,10 +78,20 @@ pub fn build_playback_arguments(
         OsString::from("--url"),
         OsString::from(&request.url),
         OsString::from("--default-stream"),
-        OsString::from(match request.quality.preference {
-            QualityPreference::Best => "best",
-            QualityPreference::Worst => "worst",
-            QualityPreference::AudioOnly => "audio_only",
+        OsString::from(if let Some(variant_name) = &request.variant_name {
+            validate_text("stream variant", variant_name)?;
+            if variant_name.trim().is_empty() {
+                return Err(ArgumentError::InvalidValue(
+                    "stream variant cannot be empty".into(),
+                ));
+            }
+            variant_name.as_str()
+        } else {
+            match request.quality.preference {
+                QualityPreference::Best => "best",
+                QualityPreference::Worst => "worst",
+                QualityPreference::AudioOnly => "audio_only",
+            }
         }),
     ];
 

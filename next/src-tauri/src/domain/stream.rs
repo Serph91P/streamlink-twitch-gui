@@ -75,11 +75,72 @@ pub struct PlayerSettings {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    System,
+    Dark,
+    Light,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NotificationSettings {
+    pub live_channels: bool,
+    pub playback_errors: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HotkeySettings {
+    pub enabled: bool,
+    pub accelerator: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
+    pub schema_version: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub streamlink_path: Option<String>,
     pub quality: QualityConstraints,
     pub codec_preference: CodecPreference,
     pub player: PlayerSettings,
+    pub theme: Theme,
+    pub language: String,
+    pub notifications: NotificationSettings,
+    pub hotkey: HotkeySettings,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            streamlink_path: None,
+            quality: QualityConstraints {
+                preference: QualityPreference::Best,
+                maximum_height: None,
+                maximum_fps: None,
+            },
+            codec_preference: CodecPreference {
+                allowed: vec![StreamCodec::H264, StreamCodec::H265, StreamCodec::Av1],
+                preferred: None,
+            },
+            player: PlayerSettings {
+                path: None,
+                arguments: Vec::new(),
+            },
+            theme: Theme::System,
+            language: "en".into(),
+            notifications: NotificationSettings {
+                live_channels: false,
+                playback_errors: true,
+            },
+            hotkey: HotkeySettings {
+                enabled: false,
+                accelerator: "Ctrl+Shift+S".into(),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

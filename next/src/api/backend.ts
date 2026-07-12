@@ -12,6 +12,37 @@ import {
   type TwitchStream,
   type TwitchUser,
 } from "../domain/twitch";
+import type { Settings } from "../domain/settings";
+import {
+  parseStreamCapabilities,
+  type StreamCapabilities,
+  type StreamCodec,
+} from "../domain/stream";
+
+export interface PlaybackLaunchRequest {
+  url: string;
+  variantName: string;
+  codecs: StreamCodec[];
+}
+
+export interface PlaybackResult {
+  status: "running" | "stopped";
+  diagnostics: string[];
+}
+
+export interface PlaybackBackend {
+  inspectStreams(
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<StreamCapabilities>;
+  launchStream(request: PlaybackLaunchRequest): Promise<PlaybackResult>;
+  stopStream(): Promise<PlaybackResult>;
+}
+
+export interface SettingsBackend {
+  loadSettings(): Promise<Settings>;
+  saveSettings(settings: Settings): Promise<Settings>;
+}
 
 export interface TwitchBackend {
   getSession(signal?: AbortSignal): Promise<TwitchSession>;
@@ -53,9 +84,22 @@ export interface TwitchBackend {
   ): Promise<TwitchPage<TwitchGame>>;
 }
 
+export type AppBackend = TwitchBackend & PlaybackBackend & SettingsBackend;
+
 type BackendOverrides = Partial<{
-  [Key in keyof TwitchBackend]: TwitchBackend[Key];
+  [Key in keyof AppBackend]: AppBackend[Key];
 }>;
+
+export const defaultSettings: Settings = {
+  schemaVersion: 1,
+  player: { arguments: [] },
+  codecPreference: { allowed: ["h264", "h265", "av1"] },
+  quality: { preference: "best" },
+  theme: "system",
+  language: "en",
+  notifications: { liveChannels: false, playbackErrors: true },
+  hotkey: { enabled: false, accelerator: "Ctrl+Shift+S" },
+};
 
 const emptyPage = <T>(): TwitchPage<T> => ({ items: [] });
 
@@ -85,7 +129,7 @@ async function detachOnAbort<T>(
   }
 }
 
-export class TauriBackend implements TwitchBackend {
+export class TauriBackend implements AppBackend {
   async getSession(signal?: AbortSignal): Promise<TwitchSession> {
     return parseTwitchSession(
       await detachOnAbort(invoke("get_twitch_session"), signal),
@@ -173,9 +217,34 @@ export class TauriBackend implements TwitchBackend {
       signal,
     );
   }
+
+  async inspectStreams(
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<StreamCapabilities> {
+    return parseStreamCapabilities(
+      await detachOnAbort(invoke("inspect_streams", { url }), signal),
+    );
+  }
+
+  launchStream(request: PlaybackLaunchRequest): Promise<PlaybackResult> {
+    return invoke("launch_stream", { request });
+  }
+
+  stopStream(): Promise<PlaybackResult> {
+    return invoke("stop_stream");
+  }
+
+  loadSettings(): Promise<Settings> {
+    return invoke("get_settings");
+  }
+
+  saveSettings(settings: Settings): Promise<Settings> {
+    return invoke("save_settings", { settings });
+  }
 }
 
-export class BrowserBackend implements TwitchBackend {
+export class BrowserBackend implements AppBackend {
   constructor(private readonly overrides: BackendOverrides = {}) {}
 
   async getSession(signal?: AbortSignal): Promise<TwitchSession> {
@@ -272,5 +341,41 @@ export class BrowserBackend implements TwitchBackend {
     return (
       this.overrides.searchCategories?.(query, cursor, signal) ?? emptyPage()
     );
+  }
+
+  async inspectStreams(
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<StreamCapabilities> {
+    throwIfAborted(signal);
+    return (
+      this.overrides.inspectStreams?.(url, signal) ?? {
+        variants: [],
+        supportsCodecSelection: true,
+      }
+    );
+  }
+
+  async launchStream(request: PlaybackLaunchRequest): Promise<PlaybackResult> {
+    return (
+      this.overrides.launchStream?.(request) ?? {
+        status: "running",
+        diagnostics: [],
+      }
+    );
+  }
+
+  async stopStream(): Promise<PlaybackResult> {
+    return (
+      this.overrides.stopStream?.() ?? { status: "stopped", diagnostics: [] }
+    );
+  }
+
+  async loadSettings(): Promise<Settings> {
+    return this.overrides.loadSettings?.() ?? defaultSettings;
+  }
+
+  async saveSettings(settings: Settings): Promise<Settings> {
+    return this.overrides.saveSettings?.(settings) ?? settings;
   }
 }

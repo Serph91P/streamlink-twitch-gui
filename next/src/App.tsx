@@ -1,12 +1,30 @@
-export function App() {
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useState } from "react";
+
+import { TauriBackend, type AppBackend } from "./api/backend";
+import { AppLayout, type RouteName } from "./components/layout/AppLayout";
+import { BrowseRoute } from "./routes/BrowseRoute";
+
+export function App({
+  backend = new TauriBackend(),
+}: {
+  backend?: AppBackend;
+}) {
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: { retry: false, refetchOnWindowFocus: false },
+        },
+      }),
+  );
+  const [route, setRoute] = useState<RouteName>("live");
+
   return (
-    <main className="shell">
-      <div className="brand-mark" aria-hidden="true">
-        S
-      </div>
-      <p className="eyebrow">A new desktop foundation</p>
-      <h1>Streamlink Twitch GUI</h1>
-      <p className="status">Preparing a secure connection to Streamlink.</p>
-    </main>
+    <QueryClientProvider client={queryClient}>
+      <AppLayout route={route} onNavigate={setRoute}>
+        <BrowseRoute route={route} backend={backend} onNavigate={setRoute} />
+      </AppLayout>
+    </QueryClientProvider>
   );
 }

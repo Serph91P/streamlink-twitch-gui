@@ -15,6 +15,7 @@ fn strings(arguments: &[OsString]) -> Vec<&OsStr> {
 fn builds_direct_arguments_for_dynamic_playback_settings() {
     let request = PlaybackRequest {
         url: "https://www.twitch.tv/example".into(),
+        variant_name: None,
         quality: QualityConstraints {
             preference: QualityPreference::Best,
             maximum_height: Some(1440),
@@ -73,6 +74,7 @@ fn maps_quality_preferences_without_static_quality_names() {
     ] {
         let request = PlaybackRequest {
             url: "http://localhost/channel".into(),
+            variant_name: None,
             quality: QualityConstraints {
                 preference,
                 maximum_height: None,
@@ -103,6 +105,7 @@ fn maps_quality_preferences_without_static_quality_names() {
 fn rejects_unsafe_urls_and_control_characters() {
     let base = PlaybackRequest {
         url: "file:///tmp/video".into(),
+        variant_name: None,
         quality: QualityConstraints {
             preference: QualityPreference::Best,
             maximum_height: None,
