@@ -23,9 +23,16 @@ desktop = ["dep:tauri"]
 tauri-build = { version = "2.4.1", features = [] }
 
 [dependencies]
+async-trait = "0.1.89"
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native", "linux-native", "windows-native"] }
+reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.142"
 tauri = { version = "2.11", optional = true, default-features = false, features = ["compression", "custom-protocol", "dynamic-acl", "wry", "x11"] }
+thiserror = "2.0.16"
+time = { version = "0.3.41", features = ["formatting"] }
+tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio-util = "0.7.16"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.175"
