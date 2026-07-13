@@ -466,6 +466,29 @@ textarea:focus-visible {
 .migration-changes strong {
   color: var(--paper);
 }
+.migration-values {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.migration-values caption {
+  margin-bottom: 0.5rem;
+  color: var(--paper);
+  font-weight: 600;
+  text-align: left;
+}
+.migration-values th,
+.migration-values td {
+  padding: 0.55rem;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+}
+.migration-values td {
+  color: var(--muted);
+}
 .quality-picker {
   display: grid;
   gap: 0.8rem;
