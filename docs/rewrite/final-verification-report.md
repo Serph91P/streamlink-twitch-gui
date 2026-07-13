@@ -24,11 +24,11 @@ The current `main...develop` comparison shows `develop` five commits ahead of `m
 
 ## New entry point and legacy reachability
 
-A code-only Graphify build was generated for the whole repository:
+A code-only Graphify build was generated for the whole repository at reviewed revision `8d3f5c78a13bcf1ed487ceb4c20b1f9124d32e8b`:
 
-- 2,935 nodes
-- 4,136 edges
-- 545 communities
+- 2,937 nodes
+- 4,138 edges
+- 546 communities
 - React entry points: `next/src/main.tsx:L1` and `next/src/main.tsx:L8`
 - Tauri entry points: `next/src-tauri/src/main.rs:L1`, `next/src-tauri/src/lib.rs:L1`, and `next/src-tauri/src/lib.rs:L11`
 
@@ -42,23 +42,23 @@ Conclusion: the retained legacy tree is not reachable from the new React/Tauri r
 
 The following checks passed on verification branch merge revision `ec06104c278ab0e090a071963f4e685f532cec31`, which incorporates the exact reviewed `origin/develop` revision:
 
-| Layer | Evidence |
-| --- | --- |
-| Dependency installation | Clean `npm ci` installed 279 packages with 0 vulnerabilities |
-| Frontend formatting | Prettier passed |
-| Frontend lint | ESLint passed |
-| Type safety | TypeScript passed |
-| Frontend unit/component tests | Vitest passed 8 files and 29 tests |
-| Frontend build | Vite production build passed with 91 modules transformed |
-| Retained-path E2E | Full Playwright suite passed 8 tests: 4 desktop and 4 narrow at 390x844 |
-| Accessibility | Axe WCAG 2 A/AA checks passed on desktop and narrow with zero violations |
-| Frontend production dependency audit | `npm audit --omit=dev --audit-level=low` found 0 vulnerabilities |
-| Rust formatting | `cargo fmt` passed |
-| Rust advisory scan | `cargo audit` scanned 532 dependencies with no vulnerability failure and 17 allowed warnings |
-| Rust policy | `cargo deny` passed advisories, bans, licenses, and sources |
-| Streamlink compatibility | Installed Streamlink 8.0.0 and 8.4.0 contract tests each passed 1 test |
-| Release tooling | Python release/workflow suite passed 30 tests |
-| Immutable workflow actions | `scripts/verify_workflows.py` passed |
+| Layer                                | Evidence                                                                                     |
+| ------------------------------------ | -------------------------------------------------------------------------------------------- |
+| Dependency installation              | Clean `npm ci` installed 279 packages with 0 vulnerabilities                                 |
+| Frontend formatting                  | Prettier passed                                                                              |
+| Frontend lint                        | ESLint passed                                                                                |
+| Type safety                          | TypeScript passed                                                                            |
+| Frontend unit/component tests        | Vitest passed 8 files and 29 tests                                                           |
+| Frontend build                       | Vite production build passed with 91 modules transformed                                     |
+| Retained-path E2E                    | Full Playwright suite passed 8 tests: 4 desktop and 4 narrow at 390x844                      |
+| Accessibility                        | Axe WCAG 2 A/AA checks passed on desktop and narrow with zero violations                     |
+| Frontend production dependency audit | `npm audit --omit=dev --audit-level=low` found 0 vulnerabilities                             |
+| Rust formatting                      | `cargo fmt` passed                                                                           |
+| Rust advisory scan                   | `cargo audit` scanned 532 dependencies with no vulnerability failure and 17 allowed warnings |
+| Rust policy                          | `cargo deny` passed advisories, bans, licenses, and sources                                  |
+| Streamlink compatibility             | Installed Streamlink 8.0.0 and 8.4.0 contract tests each passed 1 test                       |
+| Release tooling                      | Python release/workflow suite passed 30 tests                                                |
+| Immutable workflow actions           | `scripts/verify_workflows.py` passed                                                         |
 
 Fresh `actionlint` execution was unavailable on this host. The prior report's passing local `actionlint` evidence remains applicable because the WCAG merge did not change workflows, and the exact reviewed revision's GitHub workflow runs passed.
 
@@ -120,7 +120,7 @@ The checked-in release workflow has the intended architecture:
 - Platform bundles are built for Linux x64, Windows x64, macOS x64, and macOS arm64.
 - Signed updater artifacts are required and verified before draft creation.
 - Release assets are collected and validated centrally.
-- The release remains a GitHub draft and prerelease until a maintainer manually publishes it.
+- The workflow creates or updates a GitHub draft release and requires manual publication.
 - All third-party Actions are pinned to full commit SHAs.
 
 The governance controls needed by the workflow now exist: `main` is protected, and the protected-branches-only `release` environment requires reviewer `Serph91P`. However, both repository and release-environment secret name lists are empty. The workflow references exactly these 13 production secret names:
@@ -191,7 +191,7 @@ The following checks remain mandatory. Only governance and WCAG remediation supp
 - [ ] Promote the reviewed `develop` commit to `main` through a protected pull request only after all credentials are provisioned.
 - [ ] Approve the protected `release` environment deployment.
 - [ ] Confirm every platform build and asset-verification job is green.
-- [ ] Confirm the workflow creates a signed draft prerelease with the complete expected asset set.
+- [ ] Confirm the workflow creates or updates a signed GitHub draft release with the complete expected asset set.
 - [ ] Download and install-test the draft assets on the required clean systems and hardware.
 - [ ] Attach evidence for every manual platform, migration, updater, and asset check.
 - [ ] Publish manually only after all checklist evidence is complete.
