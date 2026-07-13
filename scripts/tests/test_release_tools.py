@@ -250,6 +250,14 @@ class WorkflowPinTests(unittest.TestCase):
             verify_workflows.validate_uses_line(invalid, "test.yml", 1),
         )
 
+    def test_non_release_workflows_have_read_only_contents_permission(self):
+        workflows = SCRIPTS.parent / ".github/workflows"
+
+        for filename in ("main.yml", "next-ci.yml", "security.yml"):
+            with self.subTest(filename=filename):
+                workflow = (workflows / filename).read_text(encoding="utf-8")
+                self.assertIn("\npermissions:\n  contents: read\n\n", workflow)
+
 
 class ReleaseTagTests(unittest.TestCase):
     repository = "owner/project"
