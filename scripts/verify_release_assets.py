@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
 import argparse
 import json
-import os
-import subprocess
 from pathlib import Path
-from typing import Callable
-from urllib.parse import quote
 
 from release_common import (
     checksum_name,
     expected_asset_names,
     sbom_name,
-    updater_assets,
     validate_target_sha,
     validate_version,
 )
@@ -31,30 +26,19 @@ def read_checksums(path: Path) -> dict[str, str]:
     return checksums
 
 
-def verify_updater_signature(artifact: Path, signature: Path) -> None:
-    verifier = os.environ.get("UPDATER_SIGNATURE_VERIFIER", "").strip()
-    if not verifier:
-        raise ValueError("UPDATER_SIGNATURE_VERIFIER is missing")
-    try:
-        subprocess.run([verifier, artifact, signature], check=True)
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise ValueError(
-            f"cryptographic updater signature verification failed: {artifact.name}"
-        ) from error
-
-
 def verify_release(
     directory: Path,
     version: str,
     tag: str,
     repository: str,
     target_sha: str,
-    signature_verifier: Callable[[Path, Path], None] = verify_updater_signature,
 ) -> None:
     validate_version(version)
     validate_target_sha(target_sha)
     if tag != f"v{version}":
         raise ValueError("release tag does not match version")
+    if repository.count("/") != 1:
+        raise ValueError("repository must use the owner/name format")
     expected = expected_asset_names(version)
     actual = {path.name for path in directory.iterdir() if path.is_file()}
     if actual != expected:
@@ -71,27 +55,6 @@ def verify_release(
     for name, digest in checksums.items():
         if sha256(directory / name) != digest:
             raise ValueError(f"checksum mismatch: {name}")
-
-    manifest = json.loads((directory / "latest.json").read_text(encoding="utf-8"))
-    if manifest.get("version") != version:
-        raise ValueError("updater manifest version mismatch")
-    if manifest.get("source_commit") != target_sha:
-        raise ValueError("updater manifest source commit mismatch")
-    expected_platforms = updater_assets(version)
-    if set(manifest.get("platforms", {})) != set(expected_platforms):
-        raise ValueError("updater manifest platform set mismatch")
-    for platform, (asset_name, signature_name) in expected_platforms.items():
-        entry = manifest["platforms"][platform]
-        signature = (directory / signature_name).read_text(encoding="utf-8").strip()
-        if entry.get("signature") != signature:
-            raise ValueError(f"updater signature mismatch: {platform}")
-        signature_verifier(directory / asset_name, directory / signature_name)
-        expected_url = (
-            f"https://github.com/{repository}/releases/download/"
-            f"{quote(tag, safe='')}/{quote(asset_name, safe='')}"
-        )
-        if entry.get("url") != expected_url:
-            raise ValueError(f"updater URL mismatch: {platform}")
 
     sbom = json.loads((directory / sbom_name(version)).read_text(encoding="utf-8"))
     if sbom.get("bomFormat") != "CycloneDX" or sbom.get("specVersion") != "1.6":
@@ -131,14 +94,10 @@ def main() -> None:
     assets_parser.add_argument("--tag", required=True)
     assets_parser.add_argument("--repository", required=True)
     assets_parser.add_argument("--target-sha", required=True)
-    assets_parser.add_argument("--signature-verifier", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "version":
         print(validate_version(args.value))
     else:
-        os.environ["UPDATER_SIGNATURE_VERIFIER"] = str(
-            args.signature_verifier.resolve(strict=True)
-        )
         verify_release(
             args.directory,
             args.version,

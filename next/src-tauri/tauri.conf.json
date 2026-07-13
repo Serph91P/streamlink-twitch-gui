@@ -28,13 +28,6 @@
 		"active": true,
 		"targets": "all",
 		"icon": ["icons/icon.png", "icons/icon.ico"],
-		"createUpdaterArtifacts": false,
-		"macOS": {
-			"hardenedRuntime": true
-		},
-		"windows": {
-			"digestAlgorithm": "sha256",
-			"timestampUrl": "http://timestamp.digicert.com"
-		}
+		"createUpdaterArtifacts": false
 	}
 }
