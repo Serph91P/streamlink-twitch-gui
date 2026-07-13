@@ -86,6 +86,30 @@ class ReleaseAssetTests(unittest.TestCase):
                 self.target_sha,
             )
 
+    def test_malformed_repository_identifiers_fail(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.create_complete_release(directory)
+
+            for repository in (
+                "",
+                "owner",
+                "/",
+                "owner/",
+                "/project",
+                "owner//project",
+                "owner/project/extra",
+            ):
+                with self.subTest(repository=repository):
+                    with self.assertRaisesRegex(ValueError, "owner/name"):
+                        verify_release_assets.verify_release(
+                            directory,
+                            self.version,
+                            self.tag,
+                            repository,
+                            self.target_sha,
+                        )
+
     def test_exact_unsigned_package_and_metadata_contract(self):
         expected = self.package_names() | {
             release_common.checksum_name(self.version),
@@ -200,6 +224,64 @@ class ReleaseAssetTests(unittest.TestCase):
                     self.repository,
                     self.target_sha,
                 )
+
+    def test_duplicate_sbom_source_properties_fail(self):
+        for value in (self.target_sha, "b" * 40):
+            with (
+                self.subTest(value=value),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                directory = Path(temporary)
+                self.create_complete_release(directory)
+                sbom_path = directory / release_common.sbom_name(self.version)
+                sbom = json.loads(sbom_path.read_text(encoding="utf-8"))
+                sbom["metadata"]["properties"].insert(
+                    0,
+                    {
+                        "name": "io.github.streamlink-twitch-gui.source-commit",
+                        "value": value,
+                    },
+                )
+                sbom_path.write_text(json.dumps(sbom), encoding="utf-8")
+                release_metadata.write_checksums(directory, self.version)
+
+                with self.assertRaisesRegex(ValueError, "duplicate SBOM property"):
+                    verify_release_assets.verify_release(
+                        directory,
+                        self.version,
+                        self.tag,
+                        self.repository,
+                        self.target_sha,
+                    )
+
+    def test_duplicate_sbom_file_components_fail(self):
+        for conflict in (False, True):
+            with (
+                self.subTest(conflict=conflict),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                directory = Path(temporary)
+                self.create_complete_release(directory)
+                sbom_path = directory / release_common.sbom_name(self.version)
+                sbom = json.loads(sbom_path.read_text(encoding="utf-8"))
+                component = next(
+                    item for item in sbom["components"] if item["type"] == "file"
+                )
+                duplicate = json.loads(json.dumps(component))
+                if conflict:
+                    duplicate["hashes"][0]["content"] = "0" * 64
+                sbom["components"].insert(0, duplicate)
+                sbom_path.write_text(json.dumps(sbom), encoding="utf-8")
+                release_metadata.write_checksums(directory, self.version)
+
+                with self.assertRaisesRegex(ValueError, "duplicate SBOM file component"):
+                    verify_release_assets.verify_release(
+                        directory,
+                        self.version,
+                        self.tag,
+                        self.repository,
+                        self.target_sha,
+                    )
 
     def test_sbom_contains_artifact_hashes(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -470,9 +552,16 @@ class NativeReleaseContractTests(unittest.TestCase):
 
     def test_draft_release_prominently_discloses_unsigned_community_policy(self):
         workflow = self.read(".github/workflows/next-release.yml")
+        release_notes = workflow.split("release_notes=$(cat <<'EOF'\n", 1)[1].split(
+            "\n          EOF", 1
+        )[0]
         required_warnings = (
             "UNSIGNED COMMUNITY BUILD",
             "No platform publisher trust",
+            "Windows SmartScreen",
+            "unknown publisher",
+            "macOS Gatekeeper",
+            "quarantine",
             "not notarized by Apple",
             "No automatic updater metadata",
             "Manual install testing is required",
@@ -480,7 +569,7 @@ class NativeReleaseContractTests(unittest.TestCase):
 
         self.assertGreaterEqual(workflow.count("UNSIGNED COMMUNITY BUILD"), 2)
         for warning in required_warnings:
-            self.assertIn(warning, workflow)
+            self.assertIn(warning, release_notes)
         self.assertNotIn("--prerelease", workflow)
 
     def test_public_twitch_client_id_is_required_and_compiled_for_every_build(

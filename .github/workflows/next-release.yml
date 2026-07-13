@@ -235,7 +235,8 @@ jobs:
           release_notes=$(cat <<'EOF'
           # UNSIGNED COMMUNITY BUILD
 
-          No platform publisher trust: Windows installers are unsigned, and macOS DMGs are not notarized by Apple.
+          No platform publisher trust: Windows installers are unsigned and may show Windows SmartScreen and unknown publisher warnings.
+          macOS DMGs are not notarized by Apple; macOS Gatekeeper may block downloads carrying quarantine.
           No automatic updater metadata is included; install this release manually.
           Manual install testing is required on every target platform before publication.
           Review SHA256SUMS and the CycloneDX SBOM as integrity evidence only, not as proof of publisher identity.

@@ -37,7 +37,8 @@ def verify_release(
     validate_target_sha(target_sha)
     if tag != f"v{version}":
         raise ValueError("release tag does not match version")
-    if repository.count("/") != 1:
+    repository_parts = repository.split("/")
+    if len(repository_parts) != 2 or not all(repository_parts):
         raise ValueError("repository must use the owner/name format")
     expected = expected_asset_names(version)
     actual = {path.name for path in directory.iterdir() if path.is_file()}
@@ -59,16 +60,23 @@ def verify_release(
     sbom = json.loads((directory / sbom_name(version)).read_text(encoding="utf-8"))
     if sbom.get("bomFormat") != "CycloneDX" or sbom.get("specVersion") != "1.6":
         raise ValueError("SBOM is not CycloneDX 1.6")
-    properties = {
-        item.get("name"): item.get("value")
-        for item in sbom.get("metadata", {}).get("properties", [])
-    }
-    if properties.get("io.github.streamlink-twitch-gui.source-commit") != target_sha:
+    property_items = sbom.get("metadata", {}).get("properties", [])
+    source_property = "io.github.streamlink-twitch-gui.source-commit"
+    if sum(item.get("name") == source_property for item in property_items) > 1:
+        raise ValueError(f"duplicate SBOM property: {source_property}")
+    properties = {item.get("name"): item.get("value") for item in property_items}
+    if properties.get(source_property) != target_sha:
         raise ValueError("SBOM source commit mismatch")
-    file_components = {
-        component.get("name"): component
+    file_component_items = [
+        component
         for component in sbom.get("components", [])
         if component.get("type") == "file"
+    ]
+    file_component_names = [component.get("name") for component in file_component_items]
+    if len(file_component_names) != len(set(file_component_names)):
+        raise ValueError("duplicate SBOM file component name")
+    file_components = {
+        component.get("name"): component for component in file_component_items
     }
     sbom_inputs = expected - {checksum_file, sbom_name(version)}
     if set(file_components) != sbom_inputs:
