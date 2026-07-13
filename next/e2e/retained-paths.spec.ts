@@ -114,7 +114,24 @@ async function mockDesktopBoundary(page: Page) {
             case "preview_legacy_migration":
               return {
                 status: "ready",
-                settings: { ...settings, theme: "dark", language: "de" },
+                settings: {
+                  ...settings,
+                  player: {
+                    path: "/usr/bin/mpv",
+                    arguments: ["--fullscreen", "--no-osc"],
+                  },
+                  quality: {
+                    preference: "worst",
+                    maximumHeight: 720,
+                    maximumFps: 30,
+                  },
+                  theme: "dark",
+                  language: "de",
+                  notifications: {
+                    ...settings.notifications,
+                    liveChannels: false,
+                  },
+                },
                 changes: [
                   {
                     field: "gui.theme",
@@ -132,7 +149,24 @@ async function mockDesktopBoundary(page: Page) {
             case "confirm_legacy_migration":
               return {
                 status: "completed",
-                settings: { ...settings, theme: "dark", language: "de" },
+                settings: {
+                  ...settings,
+                  player: {
+                    path: "/usr/bin/mpv",
+                    arguments: ["--fullscreen", "--no-osc"],
+                  },
+                  quality: {
+                    preference: "worst",
+                    maximumHeight: 720,
+                    maximumFps: 30,
+                  },
+                  theme: "dark",
+                  language: "de",
+                  notifications: {
+                    ...settings.notifications,
+                    liveChannels: false,
+                  },
+                },
                 changes: [],
                 channels: [],
               };
@@ -223,14 +257,50 @@ test("previews and explicitly confirms legacy settings", async ({ page }) => {
     buffer: Buffer.from(
       JSON.stringify({
         settings: JSON.stringify({ settings: { records: {} } }),
+        auth: JSON.stringify({
+          access_token: "e2e-oauth-token",
+          authorization: "Bearer e2e-authorization",
+          client_secret: "e2e-api-credential",
+          raw: "e2e-raw-local-storage-record",
+        }),
       }),
     ),
   });
+  await expect(
+    page.getByRole("button", { name: "Import supported settings" }),
+  ).toHaveCount(0);
   await page.getByRole("button", { name: "Preview legacy import" }).click();
+  const values = page.getByRole("table", {
+    name: "Current and proposed safe settings",
+  });
+  await expect(
+    values.getByRole("columnheader", { name: "Current" }),
+  ).toBeVisible();
+  await expect(
+    values.getByRole("columnheader", { name: "Proposed" }),
+  ).toBeVisible();
+  for (const rowName of [
+    "Player executable Streamlink default /usr/bin/mpv",
+    "Player arguments None --fullscreen --no-osc",
+    "Quality preference Best Worst",
+    "Maximum video height No limit 720p",
+    "Maximum frame rate No limit 30 fps",
+    "Language en de",
+    "Theme System Dark",
+    "Live channel notifications Enabled Disabled",
+  ]) {
+    await expect(values.getByRole("row", { name: rowName })).toBeVisible();
+  }
   await expect(page.getByText("gui.theme")).toBeVisible();
   await expect(
     page.getByText(/OAuth credentials are never imported/),
   ).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("e2e-oauth-token");
+  await expect(page.locator("body")).not.toContainText("e2e-authorization");
+  await expect(page.locator("body")).not.toContainText("e2e-api-credential");
+  await expect(page.locator("body")).not.toContainText(
+    "e2e-raw-local-storage-record",
+  );
 
   const before = await page.evaluate(() =>
     (

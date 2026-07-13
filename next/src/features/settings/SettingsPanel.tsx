@@ -8,6 +8,18 @@ import type {
 } from "../../api/backend";
 import type { Settings } from "../../domain/settings";
 
+const qualityNames: Record<Settings["quality"]["preference"], string> = {
+  best: "Best",
+  worst: "Worst",
+  audioOnly: "Audio only",
+};
+
+const themeNames: Record<Settings["theme"], string> = {
+  system: "System",
+  dark: "Dark",
+  light: "Light",
+};
+
 export function SettingsPanel({
   backend,
   settings: initialSettings,
@@ -122,6 +134,58 @@ export function SettingsPanel({
       setMigrationBusy(false);
     }
   }
+
+  const safeMigrationRows =
+    migration?.status === "ready"
+      ? [
+          [
+            "Player executable",
+            settings.player.path ?? "Streamlink default",
+            migration.settings.player.path ?? "Streamlink default",
+          ],
+          [
+            "Player arguments",
+            settings.player.arguments.join("\n") || "None",
+            migration.settings.player.arguments.join("\n") || "None",
+          ],
+          [
+            "Quality preference",
+            qualityNames[settings.quality.preference],
+            qualityNames[migration.settings.quality.preference],
+          ],
+          [
+            "Maximum video height",
+            settings.quality.maximumHeight
+              ? `${settings.quality.maximumHeight}p`
+              : "No limit",
+            migration.settings.quality.maximumHeight
+              ? `${migration.settings.quality.maximumHeight}p`
+              : "No limit",
+          ],
+          [
+            "Maximum frame rate",
+            settings.quality.maximumFps
+              ? `${settings.quality.maximumFps} fps`
+              : "No limit",
+            migration.settings.quality.maximumFps
+              ? `${migration.settings.quality.maximumFps} fps`
+              : "No limit",
+          ],
+          ["Language", settings.language, migration.settings.language],
+          [
+            "Theme",
+            themeNames[settings.theme],
+            themeNames[migration.settings.theme],
+          ],
+          [
+            "Live channel notifications",
+            settings.notifications.liveChannels ? "Enabled" : "Disabled",
+            migration.settings.notifications.liveChannels
+              ? "Enabled"
+              : "Disabled",
+          ],
+        ]
+      : [];
 
   return (
     <>
@@ -332,12 +396,19 @@ export function SettingsPanel({
           ) : null}
           {migration && migration.changes.length > 0 ? (
             <ul className="migration-changes">
-              {migration.changes.map((change) => (
-                <li key={`${change.field}-${change.outcome}`}>
-                  <strong>{change.field}</strong>: {change.outcome}.{" "}
-                  {change.detail}
-                </li>
-              ))}
+              {migration.changes.map((change) =>
+                change.outcome === "skippedSensitive" ? (
+                  <li key={`${change.field}-${change.outcome}`}>
+                    <strong>Sensitive fields</strong>: skipped. Plaintext OAuth
+                    credentials are never imported.
+                  </li>
+                ) : (
+                  <li key={`${change.field}-${change.outcome}`}>
+                    <strong>{change.field}</strong>: {change.outcome}.{" "}
+                    {change.detail}
+                  </li>
+                ),
+              )}
             </ul>
           ) : null}
           {migration?.channels.map((channel) => (
@@ -353,14 +424,35 @@ export function SettingsPanel({
               </ul>
             </section>
           ))}
-          {migration?.status === "ready" ? (
-            <button
-              type="button"
-              disabled={migrationBusy}
-              onClick={importMigration}
-            >
-              Import supported settings
-            </button>
+          {safeMigrationRows.length > 0 ? (
+            <>
+              <table className="migration-values">
+                <caption>Current and proposed safe settings</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Setting</th>
+                    <th scope="col">Current</th>
+                    <th scope="col">Proposed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {safeMigrationRows.map(([label, current, proposed]) => (
+                    <tr key={label}>
+                      <th scope="row">{label}</th>
+                      <td>{current}</td>
+                      <td>{proposed}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button
+                type="button"
+                disabled={migrationBusy}
+                onClick={importMigration}
+              >
+                Import supported settings
+              </button>
+            </>
           ) : null}
         </fieldset>
         {error ? <p role="alert">{error}</p> : null}
