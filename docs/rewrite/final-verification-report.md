@@ -1,5 +1,8 @@
 # Final modernization verification report
 
+> [!IMPORTANT]
+> This report is historical for exact revision `8d3f5c78a13bcf1ed487ceb4c20b1f9124d32e8b` and is superseded for current release operations by the [unsigned community release runbook](releasing.md). Its signed-release conclusions and credential gates are historical; they are not current unsigned-community gates.
+
 Date: 2026-07-13
 
 Reviewed code revision: `8d3f5c78a13bcf1ed487ceb4c20b1f9124d32e8b` on `origin/develop`

@@ -1,5 +1,8 @@
 # 03 Migration, Automation and Release
 
+> [!NOTE]
+> Signed release items are superseded for the current unsigned community channel and retained only as a future signed-production proposal. Follow the [current unsigned community runbook](../../rewrite/releasing.md).
+
 Read all previous phase files and only start after their PRs are merged into `develop`.
 
 ## Task 1: Import legacy settings safely
