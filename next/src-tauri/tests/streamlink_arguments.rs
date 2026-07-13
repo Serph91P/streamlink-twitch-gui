@@ -49,7 +49,7 @@ fn builds_direct_arguments_for_dynamic_playback_settings() {
             OsStr::new("--player"),
             OsStr::new("/opt/Video Player/player"),
             OsStr::new("--player-args"),
-            OsStr::new("--fullscreen --title=Example Stream"),
+            OsStr::new("--fullscreen '--title=Example Stream'"),
             OsStr::new("--twitch-supported-codecs"),
             OsStr::new("h264,h265,av1"),
             OsStr::new("--twitch-api-header"),

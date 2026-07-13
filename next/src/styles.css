@@ -453,6 +453,19 @@ textarea:focus-visible {
 .settings-form .primary-action {
   justify-self: start;
 }
+.migration-preview button {
+  justify-self: start;
+}
+.migration-changes {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding-left: 1.25rem;
+  color: var(--muted);
+}
+.migration-changes strong {
+  color: var(--paper);
+}
 .quality-picker {
   display: grid;
   gap: 0.8rem;

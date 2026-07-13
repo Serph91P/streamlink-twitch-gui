@@ -1,6 +1,11 @@
 import { useState, type FormEvent } from "react";
 
-import type { SettingsBackend } from "../../api/backend";
+import type {
+  LegacyMigrationBackend,
+  LegacyMigrationPreview,
+  LegacyStorageSnapshot,
+  SettingsBackend,
+} from "../../api/backend";
 import type { Settings } from "../../domain/settings";
 
 export function SettingsPanel({
@@ -8,13 +13,16 @@ export function SettingsPanel({
   settings: initialSettings,
   onSaved,
 }: {
-  backend: SettingsBackend;
+  backend: SettingsBackend & LegacyMigrationBackend;
   settings: Settings;
   onSaved: (settings: Settings) => void;
 }) {
   const [settings, setSettings] = useState(initialSettings);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [migration, setMigration] = useState<LegacyMigrationPreview>();
+  const [legacySnapshot, setLegacySnapshot] = useState<LegacyStorageSnapshot>();
+  const [migrationBusy, setMigrationBusy] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -30,6 +38,88 @@ export function SettingsPanel({
       setError(
         reason instanceof Error ? reason.message : "Could not save settings",
       );
+    }
+  }
+
+  async function selectLegacyExport(file: File | undefined) {
+    setError("");
+    setMessage("");
+    setMigration(undefined);
+    setLegacySnapshot(undefined);
+    if (!file) return;
+
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Legacy export must be a JSON object");
+      }
+      const allowed = new Set([
+        "settings",
+        "channelsettings",
+        "auth",
+        "search",
+        "window",
+        "versioncheck",
+        "app",
+      ]);
+      const snapshot: LegacyStorageSnapshot = {};
+      for (const [key, value] of Object.entries(parsed)) {
+        if (allowed.has(key) && typeof value === "string") {
+          Object.assign(snapshot, { [key]: value });
+        }
+      }
+      if (Object.keys(snapshot).length === 0) {
+        throw new Error(
+          "No supported legacy namespaces were found in this file",
+        );
+      }
+      setLegacySnapshot(snapshot);
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Could not read legacy export",
+      );
+    }
+  }
+
+  async function previewMigration() {
+    if (!legacySnapshot) return;
+    setError("");
+    setMessage("");
+    setMigrationBusy(true);
+    try {
+      setMigration(await backend.previewLegacyMigration(legacySnapshot));
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Could not preview legacy settings",
+      );
+    } finally {
+      setMigrationBusy(false);
+    }
+  }
+
+  async function importMigration() {
+    if (!legacySnapshot) return;
+    setError("");
+    setMessage("");
+    setMigrationBusy(true);
+    try {
+      const imported = await backend.confirmLegacyMigration(legacySnapshot);
+      setMigration(imported);
+      setSettings(imported.settings);
+      onSaved(imported.settings);
+      setMessage("Legacy settings imported");
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Could not import legacy settings",
+      );
+    } finally {
+      setMigrationBusy(false);
     }
   }
 
@@ -208,6 +298,70 @@ export function SettingsPanel({
               }
             />
           </label>
+        </fieldset>
+        <fieldset className="migration-preview">
+          <legend>Legacy settings import</legend>
+          <p>
+            This app cannot access the separate NW.js Chromium profile
+            automatically. Select a namespace JSON export from the previous app
+            to preview it. The file remains unchanged, and plaintext credentials
+            are always skipped.
+          </p>
+          <label>
+            Legacy namespace export
+            <input
+              type="file"
+              accept="application/json,.json"
+              onChange={(event) =>
+                void selectLegacyExport(event.currentTarget.files?.[0])
+              }
+            />
+          </label>
+          <button
+            type="button"
+            disabled={migrationBusy || !legacySnapshot}
+            onClick={previewMigration}
+          >
+            Preview legacy import
+          </button>
+          {migration?.status === "noData" ? (
+            <p>No legacy settings were found.</p>
+          ) : null}
+          {migration?.status === "alreadyCompleted" ? (
+            <p>Legacy settings were already imported.</p>
+          ) : null}
+          {migration && migration.changes.length > 0 ? (
+            <ul className="migration-changes">
+              {migration.changes.map((change) => (
+                <li key={`${change.field}-${change.outcome}`}>
+                  <strong>{change.field}</strong>: {change.outcome}.{" "}
+                  {change.detail}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {migration?.channels.map((channel) => (
+            <section key={channel.channelId}>
+              <h3>Channel {channel.channelId}</h3>
+              <ul className="migration-changes">
+                {channel.preferences.map((preference) => (
+                  <li key={preference.field}>
+                    <strong>{preference.field}</strong>: {preference.outcome}.{" "}
+                    {preference.detail}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+          {migration?.status === "ready" ? (
+            <button
+              type="button"
+              disabled={migrationBusy}
+              onClick={importMigration}
+            >
+              Import supported settings
+            </button>
+          ) : null}
         </fieldset>
         {error ? <p role="alert">{error}</p> : null}
         {message ? <p role="status">{message}</p> : null}
