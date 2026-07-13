@@ -10,6 +10,7 @@ env:
 jobs:
   current:
     name: Current application
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:

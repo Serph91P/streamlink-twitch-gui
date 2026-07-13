@@ -4,6 +4,7 @@ pub mod migration;
 pub mod settings;
 pub mod streamlink;
 pub mod twitch;
+pub mod updater_signature;
 
 #[cfg(feature = "desktop")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -22,6 +23,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(twitch_state)
         .setup(|app| {
             let settings_path = app.path().app_config_dir()?.join("settings.json");
