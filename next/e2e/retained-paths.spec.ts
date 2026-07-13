@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 
 async function mockDesktopBoundary(page: Page) {
   await page.addInitScript(() => {
@@ -182,6 +183,16 @@ async function mockDesktopBoundary(page: Page) {
 test.beforeEach(async ({ page }) => {
   await mockDesktopBoundary(page);
   await page.goto("/");
+});
+
+test("meets WCAG 2 A and AA on the primary route", async ({ page }) => {
+  await expect(page.getByRole("heading", { name: "Live now" })).toBeVisible();
+
+  const results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+
+  expect(results.violations).toEqual([]);
 });
 
 test("browses public and followed content", async ({ page }) => {
