@@ -1,16 +1,55 @@
 version: 2
 updates:
+  - package-ecosystem: "npm"
+    directory: "/next"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps(next)"
+    groups:
+      npm-production:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+      npm-development:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "cargo"
+    directory: "/next/src-tauri"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps(rust)"
+    groups:
+      cargo-compatible:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "develop"
     schedule:
       interval: "monthly"
+    open-pull-requests-limit: 5
     commit-message:
       prefix: "ci"
-    # group official actions into a single PR, unless it's a major version bump
     groups:
       github-actions:
         patterns:
-          - "actions/*"
+          - "*"
         update-types:
           - "minor"
           - "patch"
