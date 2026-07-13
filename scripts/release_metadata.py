@@ -11,7 +11,6 @@ from urllib.parse import quote
 from release_common import (
     checksum_name,
     sbom_name,
-    updater_assets,
     validate_target_sha,
     validate_version,
 )
@@ -23,41 +22,6 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def write_updater_manifest(
-    directory: Path, version: str, tag: str, repository: str, target_sha: str
-) -> Path:
-    validate_version(version)
-    validate_target_sha(target_sha)
-    if tag != f"v{version}":
-        raise ValueError("release tag must be v followed by the release version")
-    if repository.count("/") != 1:
-        raise ValueError("repository must use the owner/name format")
-
-    platforms = {}
-    for target, (asset_name, signature_name) in updater_assets(version).items():
-        signature = (directory / signature_name).read_text(encoding="utf-8").strip()
-        if len(signature) < 32 or "\x00" in signature:
-            raise ValueError(f"invalid updater signature: {signature_name}")
-        platforms[target] = {
-            "signature": signature,
-            "url": (
-                f"https://github.com/{repository}/releases/download/"
-                f"{quote(tag, safe='')}/{quote(asset_name, safe='')}"
-            ),
-        }
-
-    manifest = {
-        "version": version,
-        "notes": f"Streamlink Twitch GUI {version}",
-        "pub_date": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "source_commit": target_sha,
-        "platforms": platforms,
-    }
-    output = directory / "latest.json"
-    output.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    return output
 
 
 def npm_components(package_lock: Path) -> list[dict]:
@@ -180,15 +144,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate release supply-chain metadata")
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--version", required=True)
-    parser.add_argument("--tag", required=True)
-    parser.add_argument("--repository", required=True)
     parser.add_argument("--target-sha", required=True)
     parser.add_argument("--package-lock", type=Path, required=True)
     parser.add_argument("--cargo-lock", type=Path, required=True)
     args = parser.parse_args()
-    write_updater_manifest(
-        args.directory, args.version, args.tag, args.repository, args.target_sha
-    )
     write_sbom(
         args.directory,
         args.version,

@@ -7,10 +7,10 @@ from release_common import platform_asset_names, validate_version
 
 
 SOURCE_SUFFIXES = {
-    "linux-x64": (".AppImage", ".AppImage.sig", ".deb"),
-    "windows-x64": ("-setup.exe", "-setup.exe.sig", ".msi", ".msi.sig"),
-    "macos-x64": (".app.tar.gz", ".app.tar.gz.sig", ".dmg"),
-    "macos-arm64": (".app.tar.gz", ".app.tar.gz.sig", ".dmg"),
+    "linux-x64": (".AppImage", ".deb"),
+    "windows-x64": ("-setup.exe", ".msi"),
+    "macos-x64": (".dmg",),
+    "macos-arm64": (".dmg",),
 }
 
 
@@ -48,7 +48,7 @@ def prepare_assets(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Collect canonical signed Tauri assets")
+    parser = argparse.ArgumentParser(description="Collect canonical Tauri release assets")
     parser.add_argument("--bundle-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--platform", choices=sorted(SOURCE_SUFFIXES), required=True)
