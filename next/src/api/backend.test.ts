@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BrowserBackend } from "./backend";
+const invoke = vi.hoisted(() => vi.fn());
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+
+import { BrowserBackend, TauriBackend } from "./backend";
+
+beforeEach(() => invoke.mockReset());
 
 describe("browser backend", () => {
   it("provides typed cursor pages and honors cancellation", async () => {
@@ -32,5 +38,27 @@ describe("browser backend", () => {
     expect(JSON.stringify(values)).not.toMatch(
       /accessToken|refreshToken|deviceCode|clientSecret/i,
     );
+  });
+});
+
+describe("tauri legacy migration backend", () => {
+  it("uses only an explicit legacy export and never the new webview localStorage", async () => {
+    const snapshot = {
+      settings: '{"settings":{"records":{}}}',
+    };
+    const storageRead = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new Error("new webview localStorage must not be read");
+      });
+    invoke.mockResolvedValue({ status: "ready" });
+
+    await new TauriBackend().previewLegacyMigration(snapshot);
+
+    expect(storageRead).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith("preview_legacy_migration", {
+      snapshot,
+    });
+    storageRead.mockRestore();
   });
 });
