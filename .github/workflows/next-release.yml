@@ -121,11 +121,11 @@ jobs:
           - name: macOS x64
             os: macos-15-intel
             platform: macos-x64
-            bundles: app,dmg
+            bundles: dmg
           - name: macOS arm64
             os: macos-15
             platform: macos-arm64
-            bundles: app,dmg
+            bundles: dmg
     env:
       RELEASE_PLATFORM: ${{ matrix.platform }}
     steps:
@@ -143,126 +143,31 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
           key: cargo-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('next/src-tauri/Cargo.lock') }}
-      - name: Require common production credentials
+      - name: Require public Twitch client ID
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
-          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_ID: ${{ vars.TWITCH_CLIENT_ID }}
         shell: bash
         run: |
-          required=(TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD TAURI_UPDATER_PUBLIC_KEY TWITCH_CLIENT_ID)
-          for name in "${required[@]}"; do
-            if [[ -z "${!name:-}" ]]; then
-              echo "Missing required release environment secret: $name" >&2
-              exit 1
-            fi
-          done
-      - name: Require Windows production credentials
-        if: runner.os == 'Windows'
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        shell: bash
-        run: |
-          for name in WINDOWS_CERTIFICATE WINDOWS_CERTIFICATE_PASSWORD; do
-            if [[ -z "${!name:-}" ]]; then
-              echo "Missing required release environment secret: $name" >&2
-              exit 1
-            fi
-          done
-      - name: Require Apple production credentials
-        if: runner.os == 'macOS'
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
-        shell: bash
-        run: |
-          required=(APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_KEYCHAIN_PASSWORD)
-          for name in "${required[@]}"; do
-            if [[ -z "${!name:-}" ]]; then
-              echo "Missing required release environment secret: $name" >&2
-              exit 1
-            fi
-          done
+          if ! [[ -n "${TWITCH_CLIENT_ID//[[:space:]]/}" ]]; then
+            echo "Missing required release environment variable: TWITCH_CLIENT_ID" >&2
+            exit 1
+          fi
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends libayatana-appindicator3-dev librsvg2-dev libwebkit2gtk-4.1-dev patchelf
-      - name: Import Windows signing certificate
-        if: runner.os == 'Windows'
-        id: windows-certificate
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        shell: pwsh
-        run: |
-          $certificatePath = Join-Path $env:RUNNER_TEMP "release-signing.pfx"
-          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
-          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
-          $certificate = Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password
-          "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
-      - name: Import Apple Developer ID certificate
-        if: runner.os == 'macOS'
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
-        shell: bash
-        run: |
-          certificate="$RUNNER_TEMP/release-signing.p12"
-          keychain="$RUNNER_TEMP/release-signing.keychain-db"
-          openssl base64 -d -A -out "$certificate" <<< "$APPLE_CERTIFICATE"
-          security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$keychain"
-          security import "$certificate" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$APPLE_KEYCHAIN_PASSWORD" "$keychain"
-          security list-keychains -d user -s "$keychain"
-          security find-identity -v -p codesigning "$keychain"
       - name: Install frontend dependencies
         working-directory: next
         run: npm ci
       - name: Create release configuration
-        env:
-          TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
-        shell: bash
-        run: |
-          args=(
-            --version "${{ needs.version.outputs.version }}"
-            --repository "$GITHUB_REPOSITORY"
-            --output next/src-tauri/tauri.release.conf.json
-          )
-          if [[ "$RELEASE_PLATFORM" == windows-x64 ]]; then
-            args+=(--windows-thumbprint "${{ steps.windows-certificate.outputs.thumbprint }}")
-          fi
-          python3 scripts/create_release_config.py "${args[@]}"
-      - name: Build release bundles
-        if: runner.os != 'macOS'
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
-        working-directory: next
         run: >-
-          npm run tauri build -- --bundles "${{ matrix.bundles }}"
-          --config "${{ github.workspace }}/next/src-tauri/tauri.release.conf.json"
-      - name: Build macOS release bundles
-        if: runner.os == 'macOS'
+          python3 scripts/create_release_config.py
+          --version "${{ needs.version.outputs.version }}"
+          --output next/src-tauri/tauri.release.conf.json
+      - name: Build release bundles
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TWITCH_CLIENT_ID: ${{ vars.TWITCH_CLIENT_ID }}
         working-directory: next
         run: >-
           npm run tauri build -- --bundles "${{ matrix.bundles }}"
@@ -282,17 +187,6 @@ jobs:
           path: release-assets/*
           if-no-files-found: error
           retention-days: 7
-      - name: Remove imported signing credentials
-        if: always()
-        shell: bash
-        run: |
-          if [[ "$RUNNER_OS" == Windows && -n "${{ steps.windows-certificate.outputs.thumbprint }}" ]]; then
-            powershell -NoProfile -Command "Remove-Item 'Cert:\CurrentUser\My\${{ steps.windows-certificate.outputs.thumbprint }}' -ErrorAction SilentlyContinue"
-            rm -f "$RUNNER_TEMP/release-signing.pfx"
-          elif [[ "$RUNNER_OS" == macOS ]]; then
-            security delete-keychain "$RUNNER_TEMP/release-signing.keychain-db" 2>/dev/null || true
-            rm -f "$RUNNER_TEMP/release-signing.p12"
-          fi
 
   draft:
     name: Verify and create draft release
@@ -314,30 +208,21 @@ jobs:
           pattern: release-*
           path: release-assets
           merge-multiple: true
-      - name: Generate checksums, SBOM, and updater manifest
+      - name: Generate checksums and SBOM
         run: >-
           python3 scripts/release_metadata.py
           --directory release-assets
           --version "${{ needs.version.outputs.version }}"
-          --tag "${{ needs.version.outputs.tag }}"
-          --repository "$GITHUB_REPOSITORY"
           --target-sha "${{ needs.version.outputs.target }}"
           --package-lock next/package-lock.json
           --cargo-lock next/src-tauri/Cargo.lock
-      - name: Build pinned updater signature verifier
-        run: >-
-          cargo build --locked --manifest-path next/src-tauri/Cargo.toml
-          --no-default-features --bin verify-updater-signature
       - name: Verify complete release contract
-        env:
-          TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
         run: >-
           python3 scripts/verify_release_assets.py assets release-assets
           --version "${{ needs.version.outputs.version }}"
           --tag "${{ needs.version.outputs.tag }}"
           --repository "$GITHUB_REPOSITORY"
           --target-sha "${{ needs.version.outputs.target }}"
-          --signature-verifier next/src-tauri/target/debug/verify-updater-signature
       - name: Create or update draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -346,6 +231,17 @@ jobs:
           TARGET_SHA: ${{ needs.version.outputs.target }}
         shell: bash
         run: |
+          release_title="UNSIGNED COMMUNITY BUILD - Streamlink Twitch GUI $RELEASE_VERSION"
+          release_notes=$(cat <<'EOF'
+          # UNSIGNED COMMUNITY BUILD
+
+          No platform publisher trust: Windows installers are unsigned and may show Windows SmartScreen and unknown publisher warnings.
+          macOS DMGs are not notarized by Apple; macOS Gatekeeper may block downloads carrying quarantine.
+          No automatic updater metadata is included; install this release manually.
+          Manual install testing is required on every target platform before publication.
+          Review SHA256SUMS and the CycloneDX SBOM as integrity evidence only, not as proof of publisher identity.
+          EOF
+          )
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)
             if [[ "$draft" != true ]]; then
@@ -358,7 +254,7 @@ jobs:
               exit 1
             fi
             python3 scripts/verify_release_tag.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target-sha "$TARGET_SHA"
-            gh release edit "$RELEASE_TAG" --draft --target "$TARGET_SHA" --title "Streamlink Twitch GUI $RELEASE_VERSION"
+            gh release edit "$RELEASE_TAG" --draft --target "$TARGET_SHA" --title "$release_title" --notes "$release_notes"
             release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq .id)
             asset_ids=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" --jq '.[].id')
             while IFS= read -r asset_id; do
@@ -368,7 +264,7 @@ jobs:
             done <<< "$asset_ids"
           else
             python3 scripts/verify_release_tag.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target-sha "$TARGET_SHA" --allow-missing
-            gh release create "$RELEASE_TAG" --draft --target "$TARGET_SHA" --title "Streamlink Twitch GUI $RELEASE_VERSION" --notes "Release candidate. Review checksums, SBOM, updater signatures, platform signing and notarization where applicable, and install tests before manual publication."
+            gh release create "$RELEASE_TAG" --draft --target "$TARGET_SHA" --title "$release_title" --notes "$release_notes"
             python3 scripts/verify_release_tag.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target-sha "$TARGET_SHA"
           fi
           gh release upload "$RELEASE_TAG" release-assets/* --clobber

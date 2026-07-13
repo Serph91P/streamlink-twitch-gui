@@ -1,7 +1,7 @@
-import base64
 import hashlib
 import json
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -50,38 +50,21 @@ class ReleaseAssetTests(unittest.TestCase):
     tag = "v1.2.3"
     repository = "owner/project"
     target_sha = "a" * 40
-    raw_signature = (
-        "untrusted comment: signature from minisign secret key\n"
-        "RUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/"
-        "z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=\n"
-        "trusted comment: timestamp:1556193335\tfile:test\n"
-        "y/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZ"
-        "ZSNCisQbuQY+bHwhEBg==\n"
-    )
-    signature = base64.b64encode(raw_signature.encode()).decode() + "\n"
 
-    def verify_test_signature(self, artifact: Path, signature: Path):
-        if artifact.read_bytes() != b"test" or signature.read_text(
-            encoding="utf-8"
-        ) != self.signature:
-            raise ValueError("cryptographic updater signature verification failed")
+    def package_names(self) -> set[str]:
+        prefix = f"streamlink-twitch-gui_{self.version}"
+        return {
+            f"{prefix}_linux_x64.AppImage",
+            f"{prefix}_linux_x64.deb",
+            f"{prefix}_windows_x64-setup.exe",
+            f"{prefix}_windows_x64.msi",
+            f"{prefix}_macos_x64.dmg",
+            f"{prefix}_macos_arm64.dmg",
+        }
 
     def create_complete_release(self, directory: Path):
-        expected = release_common.expected_asset_names(self.version)
-        generated = {
-            release_common.checksum_name(self.version),
-            release_common.sbom_name(self.version),
-            "latest.json",
-        }
-        for name in sorted(expected - generated):
-            content = b"test"
-            if name.endswith(".sig"):
-                content = self.signature.encode()
-            (directory / name).write_bytes(content)
-
-        release_metadata.write_updater_manifest(
-            directory, self.version, self.tag, self.repository, self.target_sha
-        )
+        for name in sorted(self.package_names()):
+            (directory / name).write_bytes(f"test:{name}".encode())
         release_metadata.write_sbom(
             directory,
             self.version,
@@ -101,15 +84,50 @@ class ReleaseAssetTests(unittest.TestCase):
                 self.tag,
                 self.repository,
                 self.target_sha,
-                self.verify_test_signature,
             )
 
-    def test_missing_signature_fails(self):
+    def test_malformed_repository_identifiers_fail(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             self.create_complete_release(directory)
-            signature = release_common.updater_assets(self.version)["linux-x86_64"][1]
-            (directory / signature).unlink()
+
+            for repository in (
+                "",
+                "owner",
+                "/",
+                "owner/",
+                "/project",
+                "owner//project",
+                "owner/project/extra",
+            ):
+                with self.subTest(repository=repository):
+                    with self.assertRaisesRegex(ValueError, "owner/name"):
+                        verify_release_assets.verify_release(
+                            directory,
+                            self.version,
+                            self.tag,
+                            repository,
+                            self.target_sha,
+                        )
+
+    def test_exact_unsigned_package_and_metadata_contract(self):
+        expected = self.package_names() | {
+            release_common.checksum_name(self.version),
+            release_common.sbom_name(self.version),
+        }
+
+        self.assertEqual(release_common.expected_asset_names(self.version), expected)
+        self.assertFalse(any(name.endswith(".sig") for name in expected))
+        self.assertNotIn("latest.json", expected)
+        self.assertFalse(hasattr(release_common, "updater_assets"))
+        self.assertFalse(hasattr(release_metadata, "write_updater_manifest"))
+
+    def test_missing_asset_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.create_complete_release(directory)
+            package = f"streamlink-twitch-gui_{self.version}_linux_x64.deb"
+            (directory / package).unlink()
             with self.assertRaisesRegex(ValueError, "asset set"):
                 verify_release_assets.verify_release(
                     directory,
@@ -117,21 +135,36 @@ class ReleaseAssetTests(unittest.TestCase):
                     self.tag,
                     self.repository,
                     self.target_sha,
-                    self.verify_test_signature,
                 )
 
-    def test_every_updater_signature_is_in_the_manifest_contract(self):
-        expected = {
-            name
-            for name in release_common.expected_asset_names(self.version)
-            if name.endswith(".sig")
-        }
-        covered = {
-            signature
-            for _, signature in release_common.updater_assets(self.version).values()
-        }
-
-        self.assertEqual(covered, expected)
+    def test_extra_or_renamed_asset_fails(self):
+        for mutation in ("extra", "renamed"):
+            with (
+                self.subTest(mutation=mutation),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                directory = Path(temporary)
+                self.create_complete_release(directory)
+                if mutation == "extra":
+                    (directory / "latest.json").write_text("{}", encoding="utf-8")
+                else:
+                    source = (
+                        directory
+                        / f"streamlink-twitch-gui_{self.version}_macos_x64.dmg"
+                    )
+                    destination = (
+                        directory
+                        / f"streamlink-twitch-gui_{self.version}_macos_amd64.dmg"
+                    )
+                    source.rename(destination)
+                with self.assertRaisesRegex(ValueError, "asset set"):
+                    verify_release_assets.verify_release(
+                        directory,
+                        self.version,
+                        self.tag,
+                        self.repository,
+                        self.target_sha,
+                    )
 
     def test_checksum_mismatch_fails(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -146,62 +179,109 @@ class ReleaseAssetTests(unittest.TestCase):
                     self.tag,
                     self.repository,
                     self.target_sha,
-                    self.verify_test_signature,
                 )
 
-    def test_updater_signature_mismatch_fails(self):
+    def test_sbom_artifact_hash_mismatch_fails(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             self.create_complete_release(directory)
-            manifest_path = directory / "latest.json"
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["platforms"]["windows-x86_64"]["signature"] = "wrong"
-            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            sbom_path = directory / release_common.sbom_name(self.version)
+            sbom = json.loads(sbom_path.read_text(encoding="utf-8"))
+            component = next(
+                item for item in sbom["components"] if item["type"] == "file"
+            )
+            component["hashes"][0]["content"] = "0" * 64
+            sbom_path.write_text(json.dumps(sbom), encoding="utf-8")
             release_metadata.write_checksums(directory, self.version)
-            with self.assertRaisesRegex(ValueError, "signature"):
+            with self.assertRaisesRegex(ValueError, "SBOM hash"):
                 verify_release_assets.verify_release(
                     directory,
                     self.version,
                     self.tag,
                     self.repository,
                     self.target_sha,
-                    self.verify_test_signature,
                 )
 
-    def test_fabricated_signatures_matching_manifest_fail_cryptographic_check(self):
+    def test_sbom_source_sha_mismatch_fails(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             self.create_complete_release(directory)
-            fabricated = "untrusted comment: fabricated\n" + "A" * 100 + "\n"
-            for _, signature_name in release_common.updater_assets(
-                self.version
-            ).values():
-                (directory / signature_name).write_text(fabricated, encoding="utf-8")
-            release_metadata.write_updater_manifest(
-                directory,
-                self.version,
-                self.tag,
-                self.repository,
-                self.target_sha,
+            sbom_path = directory / release_common.sbom_name(self.version)
+            sbom = json.loads(sbom_path.read_text(encoding="utf-8"))
+            source_property = next(
+                item
+                for item in sbom["metadata"]["properties"]
+                if item["name"] == "io.github.streamlink-twitch-gui.source-commit"
             )
-            release_metadata.write_sbom(
-                directory,
-                self.version,
-                SCRIPTS.parent / "next/package-lock.json",
-                SCRIPTS.parent / "next/src-tauri/Cargo.lock",
-                self.target_sha,
-            )
+            source_property["value"] = "b" * 40
+            sbom_path.write_text(json.dumps(sbom), encoding="utf-8")
             release_metadata.write_checksums(directory, self.version)
-
-            with self.assertRaisesRegex(ValueError, "cryptographic"):
+            with self.assertRaisesRegex(ValueError, "SBOM source commit"):
                 verify_release_assets.verify_release(
                     directory,
                     self.version,
                     self.tag,
                     self.repository,
                     self.target_sha,
-                    self.verify_test_signature,
                 )
+
+    def test_duplicate_sbom_source_properties_fail(self):
+        for value in (self.target_sha, "b" * 40):
+            with (
+                self.subTest(value=value),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                directory = Path(temporary)
+                self.create_complete_release(directory)
+                sbom_path = directory / release_common.sbom_name(self.version)
+                sbom = json.loads(sbom_path.read_text(encoding="utf-8"))
+                sbom["metadata"]["properties"].insert(
+                    0,
+                    {
+                        "name": "io.github.streamlink-twitch-gui.source-commit",
+                        "value": value,
+                    },
+                )
+                sbom_path.write_text(json.dumps(sbom), encoding="utf-8")
+                release_metadata.write_checksums(directory, self.version)
+
+                with self.assertRaisesRegex(ValueError, "duplicate SBOM property"):
+                    verify_release_assets.verify_release(
+                        directory,
+                        self.version,
+                        self.tag,
+                        self.repository,
+                        self.target_sha,
+                    )
+
+    def test_duplicate_sbom_file_components_fail(self):
+        for conflict in (False, True):
+            with (
+                self.subTest(conflict=conflict),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                directory = Path(temporary)
+                self.create_complete_release(directory)
+                sbom_path = directory / release_common.sbom_name(self.version)
+                sbom = json.loads(sbom_path.read_text(encoding="utf-8"))
+                component = next(
+                    item for item in sbom["components"] if item["type"] == "file"
+                )
+                duplicate = json.loads(json.dumps(component))
+                if conflict:
+                    duplicate["hashes"][0]["content"] = "0" * 64
+                sbom["components"].insert(0, duplicate)
+                sbom_path.write_text(json.dumps(sbom), encoding="utf-8")
+                release_metadata.write_checksums(directory, self.version)
+
+                with self.assertRaisesRegex(ValueError, "duplicate SBOM file component"):
+                    verify_release_assets.verify_release(
+                        directory,
+                        self.version,
+                        self.tag,
+                        self.repository,
+                        self.target_sha,
+                    )
 
     def test_sbom_contains_artifact_hashes(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -227,7 +307,7 @@ class ReleaseAssetTests(unittest.TestCase):
             bundle = root / "bundle"
             output = root / "output"
             bundle.mkdir()
-            for name in ("App.AppImage", "App.AppImage.sig", "app_amd64.deb"):
+            for name in ("App.AppImage", "app_amd64.deb"):
                 (bundle / name).write_text(name, encoding="utf-8")
 
             copied = prepare_release_assets.prepare_assets(
@@ -237,6 +317,30 @@ class ReleaseAssetTests(unittest.TestCase):
                 {path.name for path in copied},
                 release_common.platform_asset_names(self.version)["linux-x64"],
             )
+
+
+class ReleaseConfigTests(unittest.TestCase):
+    def test_release_config_disables_updater_artifacts_without_credentials(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "tauri.release.conf.json"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "create_release_config.py"),
+                    "--version",
+                    "1.2.3",
+                    "--output",
+                    str(output),
+                ],
+                check=True,
+                env={},
+            )
+            config = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            config,
+            {"version": "1.2.3", "bundle": {"createUpdaterArtifacts": False}},
+        )
 
 
 class WorkflowPinTests(unittest.TestCase):
@@ -386,7 +490,10 @@ class NativeReleaseContractTests(unittest.TestCase):
         runtime = self.read("next/src-tauri/src/lib.rs")
         capability = json.loads(self.read("next/src-tauri/capabilities/main.json"))
 
-        self.assertRegex(cargo, r'tauri-plugin-updater = \{ version = "2\.\d+\.\d+", optional = true \}')
+        self.assertRegex(
+            cargo,
+            r'tauri-plugin-updater = \{ version = "2\.\d+\.\d+", optional = true \}',
+        )
         self.assertIn("dep:tauri-plugin-updater", cargo)
         self.assertIn(
             ".plugin(tauri_plugin_updater::Builder::new().build())", runtime
@@ -412,135 +519,97 @@ class NativeReleaseContractTests(unittest.TestCase):
                 workflow, "npm audit --omit=dev --audit-level=low"
             )
 
-    def test_signatures_are_cryptographically_verified_before_release(self):
+    def test_unsigned_release_has_no_signing_or_updater_requirements(self):
         workflow = self.read(".github/workflows/next-release.yml")
+        configuration = self.read("scripts/create_release_config.py")
+        metadata = self.read("scripts/release_metadata.py")
         verification = self.read("scripts/verify_release_assets.py")
 
-        self.assertIn("TAURI_UPDATER_PUBLIC_KEY", workflow)
-        self.assertIn("verify_updater_signature", verification)
+        self.assertNotIn("secrets.", workflow)
+        for obsolete in (
+            "TAURI_SIGNING_PRIVATE_KEY",
+            "TAURI_UPDATER_PUBLIC_KEY",
+            "WINDOWS_CERTIFICATE",
+            "certificateThumbprint",
+            "APPLE_CERTIFICATE",
+            "APPLE_SIGNING_IDENTITY",
+            "APPLE_ID",
+            "notarytool",
+            ".sig",
+            ".app.tar.gz",
+            "latest.json",
+            "signature-verifier",
+            "verify_updater_signature",
+        ):
+            with self.subTest(obsolete=obsolete):
+                self.assertNotIn(
+                    obsolete, workflow + configuration + metadata + verification
+                )
         self.assertLess(
             workflow.index("Verify complete release contract"),
             workflow.index("gh release create"),
         )
 
-    def test_release_labels_do_not_claim_all_matrix_assets_are_signed(self):
+    def test_draft_release_prominently_discloses_unsigned_community_policy(self):
         workflow = self.read(".github/workflows/next-release.yml")
-        labels = [
-            line.strip()
-            for line in workflow.splitlines()
-            if line.lstrip().startswith(("name:", "- name:"))
-        ]
+        release_notes = workflow.split("release_notes=$(cat <<'EOF'\n", 1)[1].split(
+            "\n          EOF", 1
+        )[0]
+        required_warnings = (
+            "UNSIGNED COMMUNITY BUILD",
+            "No platform publisher trust",
+            "Windows SmartScreen",
+            "unknown publisher",
+            "macOS Gatekeeper",
+            "quarantine",
+            "not notarized by Apple",
+            "No automatic updater metadata",
+            "Manual install testing is required",
+        )
 
-        self.assertFalse([label for label in labels if "signed" in label.lower()])
-        self.assertNotIn("Signed release candidate", workflow)
+        self.assertGreaterEqual(workflow.count("UNSIGNED COMMUNITY BUILD"), 2)
+        for warning in required_warnings:
+            self.assertIn(warning, release_notes)
+        self.assertNotIn("--prerelease", workflow)
 
-    def test_build_secrets_are_scoped_to_consuming_platform_steps(self):
+    def test_public_twitch_client_id_is_required_and_compiled_for_every_build(
+        self,
+    ):
         workflow = self.read(".github/workflows/next-release.yml")
         build = workflow[workflow.index("  build:") : workflow.index("  draft:")]
-        header, steps = build.split("    steps:", 1)
-        allowed_steps = {
-            "TAURI_SIGNING_PRIVATE_KEY": {
-                "Require common production credentials",
-                "Build release bundles",
-                "Build macOS release bundles",
-            },
-            "TAURI_SIGNING_PRIVATE_KEY_PASSWORD": {
-                "Require common production credentials",
-                "Build release bundles",
-                "Build macOS release bundles",
-            },
-            "TAURI_UPDATER_PUBLIC_KEY": {
-                "Require common production credentials",
-                "Create release configuration",
-            },
-            "TWITCH_CLIENT_ID": {
-                "Require common production credentials",
-                "Build release bundles",
-                "Build macOS release bundles",
-            },
-            "WINDOWS_CERTIFICATE": {
-                "Require Windows production credentials",
-                "Import Windows signing certificate",
-            },
-            "WINDOWS_CERTIFICATE_PASSWORD": {
-                "Require Windows production credentials",
-                "Import Windows signing certificate",
-            },
-            "APPLE_CERTIFICATE": {
-                "Require Apple production credentials",
-                "Import Apple Developer ID certificate",
-            },
-            "APPLE_CERTIFICATE_PASSWORD": {
-                "Require Apple production credentials",
-                "Import Apple Developer ID certificate",
-            },
-            "APPLE_SIGNING_IDENTITY": {
-                "Require Apple production credentials",
-                "Build macOS release bundles",
-            },
-            "APPLE_ID": {
-                "Require Apple production credentials",
-                "Build macOS release bundles",
-            },
-            "APPLE_PASSWORD": {
-                "Require Apple production credentials",
-                "Build macOS release bundles",
-            },
-            "APPLE_TEAM_ID": {
-                "Require Apple production credentials",
-                "Build macOS release bundles",
-            },
-            "APPLE_KEYCHAIN_PASSWORD": {
-                "Require Apple production credentials",
-                "Import Apple Developer ID certificate",
-            },
-        }
+        requirement = build.index("Require public Twitch client ID")
+        build_step = build.index("Build release bundles")
 
-        self.assertNotIn("secrets.", header)
-        actual_steps = {name: set() for name in allowed_steps}
-        current_step = ""
-        current_condition = ""
-        for line in steps.splitlines():
-            if line.startswith("      - name: "):
-                current_step = line.removeprefix("      - name: ")
-                current_condition = ""
-            elif line.startswith("        if: "):
-                current_condition = line.removeprefix("        if: ")
-            for secret in allowed_steps:
-                if f"secrets.{secret} " in line:
-                    actual_steps[secret].add(current_step)
-                    if secret.startswith("WINDOWS_"):
-                        self.assertEqual(current_condition, "runner.os == 'Windows'")
-                    elif secret.startswith("APPLE_"):
-                        self.assertEqual(current_condition, "runner.os == 'macOS'")
+        self.assertLess(requirement, build_step)
+        self.assertIn("TWITCH_CLIENT_ID: ${{ vars.TWITCH_CLIENT_ID }}", build)
+        self.assertIn('[[ -n "${TWITCH_CLIENT_ID//[[:space:]]/}" ]]', build)
+        self.assertIn(
+            "TWITCH_CLIENT_ID: ${{ vars.TWITCH_CLIENT_ID }}", build[build_step:]
+        )
+        self.assertNotIn("TWITCH_CLIENT_SECRET", workflow)
 
-        self.assertEqual(actual_steps, allowed_steps)
-
-        draft = workflow[workflow.index("  draft:") :]
-        draft_header, draft_steps = draft.split("    steps:", 1)
-        verification = draft_steps[
-            draft_steps.index("      - name: Verify complete release contract") :
-            draft_steps.index("      - name: Create or update draft release")
-        ]
-        self.assertNotIn("secrets.", draft_header)
-        self.assertEqual(draft_steps.count("secrets.TAURI_UPDATER_PUBLIC_KEY"), 1)
-        self.assertIn("secrets.TAURI_UPDATER_PUBLIC_KEY", verification)
-
-    def test_release_docs_distinguish_artifact_signing_and_integrity_metadata(self):
+    def test_release_docs_describe_unsigned_community_limitations(self):
         documentation = self.read("docs/rewrite/releasing.md")
+        normalized = " ".join(documentation.split())
 
-        self.assertNotIn("# Signed draft releases", documentation)
-        self.assertNotIn("builds signed packages", documentation)
         for claim in (
-            "Linux `.AppImage` | Yes, detached `.sig` | None",
-            "Linux `.deb` | No | None; package is unsigned",
-            "Windows NSIS `.exe` | Yes, detached `.sig` | Authenticode",
-            "Windows `.msi` | Yes, detached `.sig` | Authenticode",
-            "macOS `.app.tar.gz` | Yes, detached `.sig` | Contains a Developer ID signed and notarized app",
-            "macOS `.dmg` | No | Developer ID signed, notarized, and stapled",
-            "Checksums and SBOM artifact hashes are integrity metadata, not package signatures.",
+            "unsigned community build",
+            "Windows SmartScreen",
+            "unknown publisher",
+            "macOS Gatekeeper",
+            "quarantine",
+            "not notarized",
+            "automatic updates are not available",
+            "Checksums and SBOM hashes do not make unsigned packages secure",
+            "TWITCH_CLIENT_ID",
+            "Future signed production releases",
         ):
-            self.assertIn(claim, documentation)
+            self.assertIn(claim, normalized)
+
+    def test_release_workflow_actions_are_pinned(self):
+        errors = verify_workflows.verify_workflows(SCRIPTS.parent / ".github/workflows")
+
+        self.assertEqual(errors, [])
 
     def test_streamlink_lanes_pass_installed_binary_output_to_rust(self):
         workflow = self.read(".github/workflows/next-ci.yml")

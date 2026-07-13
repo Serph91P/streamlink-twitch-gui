@@ -34,13 +34,16 @@ Download packages from this repository's [Releases page](https://github.com/Serp
 
 - Windows x64: NSIS `.exe` and MSI installers
 - Linux x64: AppImage and Debian `.deb` package
-- macOS x64: application archive and DMG
-- macOS arm64: application archive and DMG
+- macOS x64: DMG
+- macOS arm64: DMG
 
-The next release workflow is draft-only and requires Windows code signing,
-Apple Developer ID signing and notarization, and Tauri updater signatures.
-Only manually published drafts that pass the documented verification gate are
-release candidates. See [`docs/rewrite/releasing.md`](docs/rewrite/releasing.md).
+The next release workflow creates unsigned community builds as drafts only.
+Windows installers have no trusted publisher and may trigger SmartScreen;
+macOS DMGs are not signed or notarized and may be blocked by Gatekeeper. This
+channel has no automatic updater metadata, so releases must be installed
+manually. Only manually published drafts that pass the documented verification
+gate are release candidates. See
+[`docs/rewrite/releasing.md`](docs/rewrite/releasing.md).
 
 ## Development
 
@@ -85,7 +88,7 @@ Start a development build from `next/` after setting `TWITCH_CLIENT_ID` in the b
 npm run tauri dev
 ```
 
-Release packages are built by [`.github/workflows/next-release.yml`](.github/workflows/next-release.yml) only when a commit is pushed to `main`. The workflow binds all builds and generated metadata to that triggering commit, creates a draft, and never publishes it automatically. See [`docs/rewrite/releasing.md`](docs/rewrite/releasing.md) for the signing and publication contract.
+Release packages are built by [`.github/workflows/next-release.yml`](.github/workflows/next-release.yml) only when a commit is pushed to `main`. The workflow binds all builds and generated metadata to that triggering commit, creates a draft, and never publishes it automatically. See [`docs/rewrite/releasing.md`](docs/rewrite/releasing.md) for the unsigned community release and manual publication contract.
 
 ## Contributing
 

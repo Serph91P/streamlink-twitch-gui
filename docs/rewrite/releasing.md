@@ -1,206 +1,173 @@
-# Draft application releases
+# Unsigned community release runbook
 
-The next application release workflow builds platform packages and Tauri
-updater artifacts, then creates or updates a draft GitHub Release. It never
-publishes the draft. A maintainer must review the workflow, install-test the
-packages, and publish the release through the GitHub UI as a separate manual
-action.
+The current release channel produces an unsigned community build for manual
+evaluation. A push to `main` validates the exact source commit, builds packages,
+and creates or updates a GitHub Draft Release. The workflow never publishes a
+release. A maintainer must review and install-test the draft before manually
+publishing it through GitHub.
 
-## Release source
+This channel does not provide platform publisher trust. Windows installers are
+not Authenticode signed. macOS DMGs are not Developer ID signed or notarized.
+Tauri updater artifacts and metadata are disabled, so automatic updates are not
+available. Users must download and install each release manually.
 
-`.github/workflows/next-release.yml` has one release authority: a `push` event
-for `main`. Tag pushes and manual dispatches cannot start this workflow. Normal
-changes continue to use pull requests targeting `develop`; a separately
-reviewed promotion to `main` is the release boundary.
+## Release source and controls
 
-The source version must match in `next/src-tauri/tauri.conf.json`,
-`next/package.json`, and `next/src-tauri/Cargo.toml`, and it must be a strict
-`MAJOR.MINOR.PATCH` value. The workflow derives `vMAJOR.MINOR.PATCH` from those
-files. Before any build, it proves that the checkout SHA equals the push
-event's `GITHUB_SHA`. Every later checkout, artifact, `latest.json`, SBOM, tag,
-and draft release target uses that exact SHA. A published release with the same
-version is never modified, so increment all three manifests before promoting a
-new release.
+`.github/workflows/next-release.yml` runs only for a push to `main`. Tag pushes,
+manual dispatches, and workflow inputs cannot start it. Development changes
+continue to target `develop`; a separately reviewed promotion to `main` is the
+release boundary.
 
-The workflow checks frontend formatting, ESLint, TypeScript, Vitest, Vite,
-rustfmt, Clippy, and Rust tests before release builds start. Release versions
-are supplied through a workflow-generated Tauri configuration file. The
-workflow does not commit version changes. Protect `main` against direct pushes
-and protect the `release` environment with required reviewers. Do not approve
-a release environment deployment from an unreviewed triggering commit.
+The version in `next/src-tauri/tauri.conf.json`, `next/package.json`, and
+`next/src-tauri/Cargo.toml` must match exactly and use `MAJOR.MINOR.PATCH`. The
+workflow derives the `vMAJOR.MINOR.PATCH` tag and proves the checkout is the
+push event's `GITHUB_SHA`. Every later checkout, package, SBOM, tag check, and
+draft target remains bound to that commit.
+
+Before building packages, CI runs frontend formatting, ESLint, TypeScript,
+Vitest, Vite, rustfmt, Clippy, and Rust tests. Actions use immutable commit SHA
+pins. The `release` environment protects both package builds and draft
+creation. Configure required reviewers and do not approve a deployment from an
+unreviewed source commit.
+
+An existing published release is never modified. An existing draft is updated
+only when its target commit is unchanged, and existing assets are removed
+before the exact replacement set is uploaded. Publication remains a separate
+manual action.
 
 ## Release environment
 
-Create a GitHub environment named `release`. Store every credential as an
-environment secret, not in repository files, workflow inputs, build logs, or
-artifacts. The build fails before compilation when a required value is absent.
+Create a GitHub environment named `release` and add one environment variable:
 
-All platforms require:
+- `TWITCH_CLIENT_ID`: the public Twitch desktop application client ID.
 
-- `TAURI_SIGNING_PRIVATE_KEY`: Tauri updater private key content.
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: updater key password.
-- `TAURI_UPDATER_PUBLIC_KEY`: matching Tauri updater public key content.
-- `TWITCH_CLIENT_ID`: public Twitch desktop application client ID compiled into
-  the application.
+The workflow reads it only as `${{ vars.TWITCH_CLIENT_ID }}`, rejects an empty
+or whitespace-only value before compiling each platform, and embeds it in every
+build. It is public application configuration, not a secret. Do not configure
+or use `TWITCH_CLIENT_SECRET`; a desktop application cannot keep a client
+secret confidential.
 
-Windows additionally requires:
+This release workflow requires no signing, certificate, Apple account,
+notarization, or updater-key secrets.
 
-- `WINDOWS_CERTIFICATE`: base64-encoded PFX code-signing certificate.
-- `WINDOWS_CERTIFICATE_PASSWORD`: PFX export password.
+## Artifact contract
 
-macOS additionally requires:
-
-- `APPLE_CERTIFICATE`: base64-encoded Developer ID Application P12 certificate.
-- `APPLE_CERTIFICATE_PASSWORD`: P12 export password.
-- `APPLE_SIGNING_IDENTITY`: full Developer ID Application identity.
-- `APPLE_ID`: Apple account used for notarization.
-- `APPLE_PASSWORD`: app-specific Apple password.
-- `APPLE_TEAM_ID`: Apple Developer team ID.
-- `APPLE_KEYCHAIN_PASSWORD`: random password for the temporary CI keychain.
-
-The workflow imports certificates into temporary runner stores and removes
-them in an `always()` cleanup step. GitHub-hosted runners are discarded after
-the job. Never encode a private key or certificate directly in YAML or Tauri
-configuration.
-
-## Platform signing
-
-Tauri updater signatures and platform code signing are independent controls.
-The detached `.sig` files authenticate only Tauri updater artifacts. Windows
-Authenticode and Apple Developer ID signing identify platform publishers, and
-Apple notarization records Apple's assessment of the macOS build.
-
-| Artifact | Tauri updater signature | Platform signing |
-| --- | --- | --- |
-| Linux `.AppImage` | Yes, detached `.sig` | None |
-| Linux `.deb` | No | None; package is unsigned |
-| Windows NSIS `.exe` | Yes, detached `.sig` | Authenticode with a trusted timestamp |
-| Windows `.msi` | Yes, detached `.sig` | Authenticode with a trusted timestamp |
-| macOS `.app.tar.gz` | Yes, detached `.sig` | Contains a Developer ID signed and notarized app |
-| macOS `.dmg` | No | Developer ID signed, notarized, and stapled |
-
-Checksums and SBOM artifact hashes are integrity metadata, not package signatures.
-They cover unsigned packages too, but do not provide a platform publisher
-identity or make a package a Tauri updater artifact.
-
-### Windows
-
-Acquire a current EV, OV, or managed code-signing certificate from a trusted
-provider. The workflow imports the PFX into the current user's certificate
-store, obtains its thumbprint, and gives that thumbprint to Tauri. Tauri uses
-SHA-256 and DigiCert timestamping while building both NSIS and MSI packages.
-
-After download, inspect both installers with `Get-AuthenticodeSignature` or
-`signtool verify /pa /all /v`. Confirm the expected publisher, a valid chain,
-and a trusted timestamp. A successful workflow alone is not an install test.
-
-### macOS
-
-Use a Developer ID Application certificate for distribution outside the App
-Store. The workflow imports it into a temporary keychain. Tauri signs with the
-configured identity and submits both Intel and Apple Silicon builds for Apple
-notarization using the Apple ID, app-specific password, and team ID.
-
-Before publication, run `codesign --verify --deep --strict --verbose=2` on the
-application, `spctl --assess --type execute --verbose=2` on the application,
-and `xcrun stapler validate` on each DMG. Install and launch each architecture
-on matching hardware or a controlled test host.
-
-## Updater keys
-
-Generate the updater key pair on a trusted offline workstation:
-
-```bash
-cd next
-npm run tauri signer generate -- -w ~/.tauri/streamlink-twitch-gui.key
-```
-
-Store the private key and password in the `release` environment and in an
-encrypted offline backup with limited custodians. The public key can be shared,
-but this repository does not contain a placeholder that could be mistaken for
-a production key. The workflow injects the real public key and the HTTPS
-`latest.json` endpoint through `tauri.release.conf.json` at build time.
-
-Tauri signs each updater artifact with `TAURI_SIGNING_PRIVATE_KEY`. Before any
-draft release command runs, the workflow builds the lockfile-pinned Rust
-verifier and uses `minisign-verify` to verify every `.sig` against
-`TAURI_UPDATER_PUBLIC_KEY` and the exact corresponding artifact bytes. It then
-checks the exact platform, URL, signature, and triggering source commit in
-`latest.json`. Missing, malformed, mismatched, legacy, or fabricated signatures
-fail closed even if their text was copied into the manifest.
-
-Key rotation requires a bridge release signed by the old key that embeds trust
-for the replacement key. Verify that installed clients can update through the
-bridge before using the new private key. Keep the old key disabled but
-recoverable until the supported upgrade window closes.
-
-If a private updater key is exposed, revoke access to the `release`
-environment, remove pending drafts, preserve audit evidence, and publish a
-security advisory. Do not ship updates under the compromised key. Existing
-clients trust that key, so recovery may require a manually installed signed
-release or an application-specific multi-key migration designed and reviewed
-before publication.
-
-## Asset contract
-
-For version `1.2.3`, the draft must contain exactly these platform families:
+For version `1.2.3`, the draft contains exactly six installable packages:
 
 ```text
 streamlink-twitch-gui_1.2.3_linux_x64.AppImage
-streamlink-twitch-gui_1.2.3_linux_x64.AppImage.sig
 streamlink-twitch-gui_1.2.3_linux_x64.deb
 streamlink-twitch-gui_1.2.3_windows_x64-setup.exe
-streamlink-twitch-gui_1.2.3_windows_x64-setup.exe.sig
 streamlink-twitch-gui_1.2.3_windows_x64.msi
-streamlink-twitch-gui_1.2.3_windows_x64.msi.sig
-streamlink-twitch-gui_1.2.3_macos_x64.app.tar.gz
-streamlink-twitch-gui_1.2.3_macos_x64.app.tar.gz.sig
 streamlink-twitch-gui_1.2.3_macos_x64.dmg
-streamlink-twitch-gui_1.2.3_macos_arm64.app.tar.gz
-streamlink-twitch-gui_1.2.3_macos_arm64.app.tar.gz.sig
 streamlink-twitch-gui_1.2.3_macos_arm64.dmg
 ```
 
-It must also contain:
+It also contains exactly two metadata files:
 
-- `latest.json` with signed Tauri updater entries for Linux x64, Windows x64,
-  macOS x64, and macOS arm64. Windows also has installer-specific NSIS and MSI
-  entries so Tauri selects and verifies the matching updater package.
-- `streamlink-twitch-gui_1.2.3.cdx.json`, a CycloneDX 1.6 SBOM covering npm and
-  Cargo inputs plus release artifact hashes.
-- `streamlink-twitch-gui_1.2.3_SHA256SUMS.txt`, covering every other asset.
+- `streamlink-twitch-gui_1.2.3_SHA256SUMS.txt`, covering every package and the
+  SBOM.
+- `streamlink-twitch-gui_1.2.3.cdx.json`, a CycloneDX 1.6 SBOM with npm and
+  Cargo components, package hashes, and the exact source commit.
 
-`scripts/verify_release_assets.py` rejects missing, extra, renamed,
-checksum-mismatched, or incorrectly signed updater assets. Run it against
-downloaded draft assets when performing an independent review. Build the
-verifier with `cargo build
---locked --manifest-path next/src-tauri/Cargo.toml --no-default-features --bin
-verify-updater-signature` and export the release's `TAURI_UPDATER_PUBLIC_KEY`
-before running:
+There are no detached signatures, application archives, updater manifests, or
+updater keys in this channel. `scripts/verify_release_assets.py` fails closed
+for a missing, extra, renamed, checksum-tampered, SBOM-hash-invalid, or
+source-SHA-invalid asset. An independent reviewer can run:
 
 ```bash
 python3 scripts/verify_release_assets.py assets release-assets \
   --version 1.2.3 \
   --tag v1.2.3 \
   --repository OWNER/REPOSITORY \
-  --target-sha 0123456789abcdef0123456789abcdef01234567 \
-  --signature-verifier next/src-tauri/target/debug/verify-updater-signature
+  --target-sha 0123456789abcdef0123456789abcdef01234567
 ```
+
+Checksums and SBOM hashes do not make unsigned packages secure. They detect
+changes relative to trusted metadata and document build inputs, but they do not
+authenticate a publisher, prove the CI runner was uncompromised, or replace
+code signing and notarization. Obtain checksum metadata through a trusted path
+before relying on it.
+
+## Windows checks
+
+Both the NSIS `.exe` and MSI are unsigned. Windows SmartScreen and User Account
+Control can report an unknown publisher or block an unfamiliar download. That
+warning is expected for this community channel and must not be described as a
+false guarantee of safety.
+
+Before publication, test both installers on a clean Windows x64 host:
+
+1. Confirm the filenames, SHA-256 hashes, version, architecture, and draft
+   target commit.
+2. Confirm `Get-AuthenticodeSignature` reports the packages as unsigned rather
+   than presenting a publisher identity.
+3. Record the exact SmartScreen and unknown publisher experience.
+4. Install, launch, authenticate, start a Streamlink playback, and uninstall
+   each package.
+
+Do not tell users to disable SmartScreen globally.
+
+## macOS checks
+
+The Intel and Apple Silicon DMGs are unsigned and not notarized. A browser
+download normally carries the `com.apple.quarantine` attribute, and macOS
+Gatekeeper may block the first launch because Apple cannot verify the developer.
+This is expected for this channel, but users must not be told that bypassing
+the warning establishes trust.
+
+Before publication, test each DMG on matching hardware:
+
+1. Confirm the filename, SHA-256 hash, version, architecture, and draft target
+   commit.
+2. Inspect the quarantine attribute and record the Gatekeeper result from a
+   normal downloaded copy.
+3. Confirm code-signing and Gatekeeper tools do not claim a trusted Developer ID
+   or Apple notarization ticket.
+4. Mount, install, launch, authenticate, start a Streamlink playback, and remove
+   the application.
+
+Document any user-approved Finder flow needed to open the application. Do not
+recommend disabling Gatekeeper globally or removing quarantine without first
+verifying the package through a trusted channel.
+
+## Linux checks
+
+Test the AppImage and Debian package on supported Linux x64 systems. Confirm
+hashes and architecture, launch the AppImage with the expected executable bit,
+install and remove the Debian package, and exercise Twitch authentication and
+Streamlink playback. Neither package has platform publisher signing in this
+channel.
 
 ## Manual publication gate
 
-Before publishing the draft:
+Before selecting Publish in GitHub:
 
-1. Confirm all release and security jobs passed for the exact target commit.
-2. Confirm the workflow was triggered by the intended `main` push and that its
-   target SHA matches `latest.json`, the SBOM source property, and the release.
-3. Independently verify `SHA256SUMS.txt`, the CycloneDX SBOM, `latest.json`, and
-   every updater signature.
-4. Verify Windows Authenticode signatures and timestamps.
-5. Verify Apple code signatures, notarization, and stapling.
-6. Install and launch every package on its target OS and architecture.
-7. Test a staged update from the previous supported release.
-8. Review the generated release notes and only then select Publish in GitHub.
+1. Confirm every required GitHub check passed for the exact draft target SHA.
+2. Confirm the workflow came from the intended `main` push and all three
+   manifest versions match the release tag.
+3. Download the draft and verify the exact six-package and two-metadata-file
+   set with `scripts/verify_release_assets.py`.
+4. Independently compare SHA-256 hashes and inspect the SBOM source commit and
+   package coverage.
+5. Complete and record the Windows, macOS, and Linux manual installation checks.
+6. Confirm the draft title and notes prominently disclose the unsigned
+   community policy, lack of Apple notarization and updater metadata, and need
+   for manual testing.
+7. Review release notes and publish only through the GitHub UI.
 
-Artifacts from a failed, cancelled, or partially approved workflow are not
-release candidates. Do not relabel unverified local builds as release artifacts.
+Artifacts from failed, cancelled, partial, or locally substituted builds are
+not release candidates.
+
+## Future signed production releases
+
+A migration to future signed production releases must be a separate reviewed
+policy change. Provision protected Windows code-signing and Apple Developer ID
+and notarization credentials, define custody and rotation procedures, restore
+platform signature verification, and validate packages on real hardware.
+
+If automatic updates return, establish a protected updater key, generate and
+verify signed updater artifacts and metadata, test upgrades and rollback from
+supported versions, and document key rotation and incident recovery. Do not
+silently relabel these unsigned community packages as signed production
+releases or enable updater discovery before that migration is complete.
