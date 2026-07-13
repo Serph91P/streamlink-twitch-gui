@@ -34,7 +34,7 @@ A code-only Graphify build was generated for the whole repository at reviewed re
 
 Directed runtime traversal over `imports`, `imports_from`, `calls`, `uses`, `contains`, `extends`, `implements`, `constructs`, and `returns` reached 94 nodes from the new entry points and reached **zero** of the 1,312 legacy nodes.
 
-Graphify also emitted one low-confidence `indirect_call` from `createUiPreferencesStore()` to the legacy `searchHistory()` symbol. Source verification shows this is a name-matching false positive, not a code path. A separate resolver checked 88 frontend import declarations and the four runtime/build configurations. No import escapes `next/`, and no build path references Ember, NW.js, Grunt, or `src/app`.
+Graphify also emitted one low-confidence `indirect_call` from `createUiPreferencesStore()` to the legacy `searchHistory()` symbol. Source verification shows this is a name-matching false positive, not a code path. A separate resolver checked 89 frontend import declarations and the four runtime/build configurations. No import escapes `next/`, and no build path references Ember, NW.js, Grunt, or `src/app`.
 
 Conclusion: the retained legacy tree is not reachable from the new React/Tauri runtime or build entry points. The only intended relationship is data migration from an explicit legacy settings export.
 
