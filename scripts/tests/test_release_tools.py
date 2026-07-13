@@ -606,6 +606,47 @@ class NativeReleaseContractTests(unittest.TestCase):
         ):
             self.assertIn(claim, normalized)
 
+    def test_signed_release_guidance_defers_to_current_unsigned_runbook(self):
+        def normalized(relative_path: str) -> str:
+            return " ".join(self.read(relative_path).lower().split())
+
+        report = normalized("docs/rewrite/final-verification-report.md")
+        for claim in (
+            "historical for exact revision `8d3f5c78a13bcf1ed487ceb4c20b1f9124d32e8b`",
+            "superseded for current release operations",
+            "signed-release conclusions and credential gates are historical",
+            "not current unsigned-community gates",
+            "](releasing.md)",
+        ):
+            self.assertIn(claim, report)
+
+        architecture = normalized("docs/rewrite/architecture-analysis.md")
+        delivery = architecture.split("### platform and delivery", 1)[1].split(
+            "## source index", 1
+        )[0]
+        for claim in (
+            "future signed-production target",
+            "separate approval",
+            "](releasing.md)",
+        ):
+            self.assertIn(claim, delivery)
+
+        for relative_path in (
+            "docs/plans/streamlink-twitch-gui-modernization/README.md",
+            "docs/plans/streamlink-twitch-gui-modernization/03-migration-and-release.md",
+        ):
+            with self.subTest(relative_path=relative_path):
+                plan = normalized(relative_path)
+                self.assertIn(
+                    "signed release items are superseded for the current unsigned "
+                    "community channel",
+                    plan,
+                )
+                self.assertIn(
+                    "retained only as a future signed-production proposal", plan
+                )
+                self.assertIn("](../../rewrite/releasing.md)", plan)
+
     def test_release_workflow_actions_are_pinned(self):
         errors = verify_workflows.verify_workflows(SCRIPTS.parent / ".github/workflows")
 

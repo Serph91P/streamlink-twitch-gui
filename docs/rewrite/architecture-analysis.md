@@ -368,7 +368,7 @@ The migration must not carry forward arbitrary custom commands without a threat-
 
 - [ ] The Tauri feasibility gate passes on Windows x64, macOS x64/arm64, Linux x64 X11, Linux x64 Wayland, and the supported webtop/container; any graphics workaround is scoped to a reproduced environment.
 - [ ] Pull requests run formatting, lint, type checks, frontend tests, Rust tests, Streamlink contract tests, security checks, and non-release package smoke builds.
-- [ ] Release workflows produce signed Windows installers, notarized macOS artifacts, Linux packages, SHA-256 checksums, SBOMs, and signed updater metadata from immutable action SHAs.
+- [ ] **Future signed-production target requiring separate approval:** Release workflows produce signed Windows installers, notarized macOS artifacts, Linux packages, SHA-256 checksums, SBOMs, and signed updater metadata from immutable action SHAs. The current unsigned community channel follows the [unsigned community runbook](releasing.md).
 - [ ] Install, upgrade, rollback, player paths with spaces and Unicode, H.264 playback, and conditional HEVC/AV1 behavior pass on each supported platform.
 - [ ] Release documentation states Streamlink/player prerequisites, codec and hardware limitations, package-specific update ownership, retained/removed legacy behavior, and recovery procedures.
 
