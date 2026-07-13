@@ -436,6 +436,32 @@ class NativeReleaseContractTests(unittest.TestCase):
         self.assertIn("inspect_streams(", rust_contract)
         self.assertIn("installed executable contract", workflow)
 
+    def test_rust_backend_prepares_frontend_dist_without_building_it(self):
+        workflow = self.read(".github/workflows/next-ci.yml")
+        rust_job = workflow[workflow.index("  rust:") : workflow.index("  streamlink-contract:")]
+
+        self.assertIn("run: mkdir -p dist", rust_job)
+        self.assertLess(rust_job.index("run: mkdir -p dist"), rust_job.index("cargo clippy"))
+        self.assertNotIn("npm run build", rust_job)
+
+    def test_streamlink_contract_disables_default_desktop_features(self):
+        workflow = self.read(".github/workflows/next-ci.yml")
+        contract_job = workflow[
+            workflow.index("  streamlink-contract:") : workflow.index("  bundle-smoke:")
+        ]
+
+        self.assertIn(
+            "cargo test --manifest-path src-tauri/Cargo.toml --no-default-features "
+            "--test streamlink_contract",
+            contract_job,
+        )
+
+    def test_bundle_smoke_uses_debug_builds(self):
+        workflow = self.read(".github/workflows/next-ci.yml")
+        bundle_job = workflow[workflow.index("  bundle-smoke:") : workflow.index("  gate:")]
+
+        self.assertIn("npm run tauri build -- --debug --bundles", bundle_job)
+
 
 if __name__ == "__main__":
     unittest.main()

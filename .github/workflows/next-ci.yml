@@ -102,6 +102,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends libayatana-appindicator3-dev librsvg2-dev libwebkit2gtk-4.1-dev patchelf
+      - name: Prepare frontend distribution
+        working-directory: next
+        run: mkdir -p dist
       - name: Check Rust backend
         working-directory: next
         run: |
@@ -142,7 +145,7 @@ jobs:
           STREAMLINK_EXPECTED_VERSION: ${{ matrix.streamlink }}
         working-directory: next
         run: >-
-          cargo test --manifest-path src-tauri/Cargo.toml --test streamlink_contract
+          cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test streamlink_contract
           installed_executable_contract -- --ignored --exact
 
   bundle-smoke:
@@ -191,7 +194,7 @@ jobs:
       - name: Build non-release bundle
         working-directory: next
         run: >-
-          npm run tauri build -- --bundles "${{ matrix.bundles }}"
+          npm run tauri build -- --debug --bundles "${{ matrix.bundles }}"
           --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
   gate:
