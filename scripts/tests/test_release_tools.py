@@ -312,6 +312,12 @@ class NativeReleaseContractTests(unittest.TestCase):
     def read(self, relative_path: str) -> str:
         return (self.root / relative_path).read_text(encoding="utf-8")
 
+    def assert_exact_run_command(self, workflow: str, command: str) -> None:
+        matching_lines = [
+            line.strip() for line in workflow.splitlines() if command in line
+        ]
+        self.assertEqual(matching_lines, [f"run: {command}"])
+
     def test_release_authority_is_main_push_only(self):
         workflow = self.read(".github/workflows/next-release.yml")
 
@@ -382,8 +388,21 @@ class NativeReleaseContractTests(unittest.TestCase):
     def test_production_npm_audit_fails_on_low_severity(self):
         workflow = self.read(".github/workflows/security.yml")
 
-        self.assertIn("npm audit --omit=dev --audit-level=low", workflow)
+        self.assert_exact_run_command(
+            workflow, "npm audit --omit=dev --audit-level=low"
+        )
         self.assertNotIn("npm audit --omit=dev --audit-level=high", workflow)
+
+    def test_production_npm_audit_rejects_trailing_shell_constructs(self):
+        workflow = self.read(".github/workflows/security.yml").replace(
+            "npm audit --omit=dev --audit-level=low",
+            "npm audit --omit=dev --audit-level=low || true",
+        )
+
+        with self.assertRaises(AssertionError):
+            self.assert_exact_run_command(
+                workflow, "npm audit --omit=dev --audit-level=low"
+            )
 
     def test_signatures_are_cryptographically_verified_before_release(self):
         workflow = self.read(".github/workflows/next-release.yml")
@@ -395,6 +414,17 @@ class NativeReleaseContractTests(unittest.TestCase):
             workflow.index("Verify complete release contract"),
             workflow.index("gh release create"),
         )
+
+    def test_release_labels_do_not_claim_all_matrix_assets_are_signed(self):
+        workflow = self.read(".github/workflows/next-release.yml")
+        labels = [
+            line.strip()
+            for line in workflow.splitlines()
+            if line.lstrip().startswith(("name:", "- name:"))
+        ]
+
+        self.assertFalse([label for label in labels if "signed" in label.lower()])
+        self.assertNotIn("Signed release candidate", workflow)
 
     def test_streamlink_lanes_pass_installed_binary_output_to_rust(self):
         workflow = self.read(".github/workflows/next-ci.yml")

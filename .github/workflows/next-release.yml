@@ -1,4 +1,4 @@
-name: Draft signed next app release
+name: Draft next app release
 
 on:
   push:
@@ -99,7 +99,7 @@ jobs:
           cargo test --manifest-path src-tauri/Cargo.toml --all-features
 
   build:
-    name: Build signed ${{ matrix.name }}
+    name: Build ${{ matrix.name }} release bundles
     needs:
       - version
       - validate
@@ -215,7 +215,7 @@ jobs:
             args+=(--windows-thumbprint "${{ steps.windows-certificate.outputs.thumbprint }}")
           fi
           python3 scripts/create_release_config.py "${args[@]}"
-      - name: Build signed and notarized bundles
+      - name: Build release bundles
         working-directory: next
         run: >-
           npm run tauri build -- --bundles "${{ matrix.bundles }}"
@@ -228,7 +228,7 @@ jobs:
           --output release-assets
           --platform "$RELEASE_PLATFORM"
           --version "${{ needs.version.outputs.version }}"
-      - name: Upload signed platform assets
+      - name: Upload release assets
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-${{ matrix.platform }}
@@ -263,7 +263,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.version.outputs.target }}
-      - name: Download all signed platform assets
+      - name: Download all release assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: release-*
@@ -321,7 +321,7 @@ jobs:
             done <<< "$asset_ids"
           else
             python3 scripts/verify_release_tag.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target-sha "$TARGET_SHA" --allow-missing
-            gh release create "$RELEASE_TAG" --draft --target "$TARGET_SHA" --title "Streamlink Twitch GUI $RELEASE_VERSION" --notes "Signed release candidate. Review checksums, SBOM, signatures, notarization, and install tests before manual publication."
+            gh release create "$RELEASE_TAG" --draft --target "$TARGET_SHA" --title "Streamlink Twitch GUI $RELEASE_VERSION" --notes "Release candidate. Review checksums, SBOM, updater signatures, platform signing and notarization where applicable, and install tests before manual publication."
             python3 scripts/verify_release_tag.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target-sha "$TARGET_SHA"
           fi
           gh release upload "$RELEASE_TAG" release-assets/* --clobber
