@@ -1,9 +1,10 @@
-# Signed draft releases
+# Draft application releases
 
-The next application release workflow builds signed packages and creates or
-updates a draft GitHub Release. It never publishes the draft. A maintainer must
-review the workflow, install-test the packages, and publish the release through
-the GitHub UI as a separate manual action.
+The next application release workflow builds platform packages and Tauri
+updater artifacts, then creates or updates a draft GitHub Release. It never
+publishes the draft. A maintainer must review the workflow, install-test the
+packages, and publish the release through the GitHub UI as a separate manual
+action.
 
 ## Release source
 
@@ -63,6 +64,24 @@ the job. Never encode a private key or certificate directly in YAML or Tauri
 configuration.
 
 ## Platform signing
+
+Tauri updater signatures and platform code signing are independent controls.
+The detached `.sig` files authenticate only Tauri updater artifacts. Windows
+Authenticode and Apple Developer ID signing identify platform publishers, and
+Apple notarization records Apple's assessment of the macOS build.
+
+| Artifact | Tauri updater signature | Platform signing |
+| --- | --- | --- |
+| Linux `.AppImage` | Yes, detached `.sig` | None |
+| Linux `.deb` | No | None; package is unsigned |
+| Windows NSIS `.exe` | Yes, detached `.sig` | Authenticode with a trusted timestamp |
+| Windows `.msi` | Yes, detached `.sig` | Authenticode with a trusted timestamp |
+| macOS `.app.tar.gz` | Yes, detached `.sig` | Contains a Developer ID signed and notarized app |
+| macOS `.dmg` | No | Developer ID signed, notarized, and stapled |
+
+Checksums and SBOM artifact hashes are integrity metadata, not package signatures.
+They cover unsigned packages too, but do not provide a platform publisher
+identity or make a package a Tauri updater artifact.
 
 ### Windows
 
@@ -151,9 +170,10 @@ It must also contain:
   Cargo inputs plus release artifact hashes.
 - `streamlink-twitch-gui_1.2.3_SHA256SUMS.txt`, covering every other asset.
 
-`scripts/verify_release_assets.py` rejects missing, extra, unsigned, renamed,
-or checksum-mismatched assets. Run it against downloaded draft assets when
-performing an independent review. Build the verifier with `cargo build
+`scripts/verify_release_assets.py` rejects missing, extra, renamed,
+checksum-mismatched, or incorrectly signed updater assets. Run it against
+downloaded draft assets when performing an independent review. Build the
+verifier with `cargo build
 --locked --manifest-path next/src-tauri/Cargo.toml --no-default-features --bin
 verify-updater-signature` and export the release's `TAURI_UPDATER_PUBLIC_KEY`
 before running:
@@ -183,4 +203,4 @@ Before publishing the draft:
 8. Review the generated release notes and only then select Publish in GitHub.
 
 Artifacts from a failed, cancelled, or partially approved workflow are not
-release candidates. Do not relabel unsigned local builds as release artifacts.
+release candidates. Do not relabel unverified local builds as release artifacts.

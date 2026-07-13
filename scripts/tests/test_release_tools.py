@@ -426,6 +426,114 @@ class NativeReleaseContractTests(unittest.TestCase):
         self.assertFalse([label for label in labels if "signed" in label.lower()])
         self.assertNotIn("Signed release candidate", workflow)
 
+    def test_build_secrets_are_scoped_to_consuming_platform_steps(self):
+        workflow = self.read(".github/workflows/next-release.yml")
+        build = workflow[workflow.index("  build:") : workflow.index("  draft:")]
+        header, steps = build.split("    steps:", 1)
+        allowed_steps = {
+            "TAURI_SIGNING_PRIVATE_KEY": {
+                "Require common production credentials",
+                "Build release bundles",
+                "Build macOS release bundles",
+            },
+            "TAURI_SIGNING_PRIVATE_KEY_PASSWORD": {
+                "Require common production credentials",
+                "Build release bundles",
+                "Build macOS release bundles",
+            },
+            "TAURI_UPDATER_PUBLIC_KEY": {
+                "Require common production credentials",
+                "Create release configuration",
+            },
+            "TWITCH_CLIENT_ID": {
+                "Require common production credentials",
+                "Build release bundles",
+                "Build macOS release bundles",
+            },
+            "WINDOWS_CERTIFICATE": {
+                "Require Windows production credentials",
+                "Import Windows signing certificate",
+            },
+            "WINDOWS_CERTIFICATE_PASSWORD": {
+                "Require Windows production credentials",
+                "Import Windows signing certificate",
+            },
+            "APPLE_CERTIFICATE": {
+                "Require Apple production credentials",
+                "Import Apple Developer ID certificate",
+            },
+            "APPLE_CERTIFICATE_PASSWORD": {
+                "Require Apple production credentials",
+                "Import Apple Developer ID certificate",
+            },
+            "APPLE_SIGNING_IDENTITY": {
+                "Require Apple production credentials",
+                "Build macOS release bundles",
+            },
+            "APPLE_ID": {
+                "Require Apple production credentials",
+                "Build macOS release bundles",
+            },
+            "APPLE_PASSWORD": {
+                "Require Apple production credentials",
+                "Build macOS release bundles",
+            },
+            "APPLE_TEAM_ID": {
+                "Require Apple production credentials",
+                "Build macOS release bundles",
+            },
+            "APPLE_KEYCHAIN_PASSWORD": {
+                "Require Apple production credentials",
+                "Import Apple Developer ID certificate",
+            },
+        }
+
+        self.assertNotIn("secrets.", header)
+        actual_steps = {name: set() for name in allowed_steps}
+        current_step = ""
+        current_condition = ""
+        for line in steps.splitlines():
+            if line.startswith("      - name: "):
+                current_step = line.removeprefix("      - name: ")
+                current_condition = ""
+            elif line.startswith("        if: "):
+                current_condition = line.removeprefix("        if: ")
+            for secret in allowed_steps:
+                if f"secrets.{secret} " in line:
+                    actual_steps[secret].add(current_step)
+                    if secret.startswith("WINDOWS_"):
+                        self.assertEqual(current_condition, "runner.os == 'Windows'")
+                    elif secret.startswith("APPLE_"):
+                        self.assertEqual(current_condition, "runner.os == 'macOS'")
+
+        self.assertEqual(actual_steps, allowed_steps)
+
+        draft = workflow[workflow.index("  draft:") :]
+        draft_header, draft_steps = draft.split("    steps:", 1)
+        verification = draft_steps[
+            draft_steps.index("      - name: Verify complete release contract") :
+            draft_steps.index("      - name: Create or update draft release")
+        ]
+        self.assertNotIn("secrets.", draft_header)
+        self.assertEqual(draft_steps.count("secrets.TAURI_UPDATER_PUBLIC_KEY"), 1)
+        self.assertIn("secrets.TAURI_UPDATER_PUBLIC_KEY", verification)
+
+    def test_release_docs_distinguish_artifact_signing_and_integrity_metadata(self):
+        documentation = self.read("docs/rewrite/releasing.md")
+
+        self.assertNotIn("# Signed draft releases", documentation)
+        self.assertNotIn("builds signed packages", documentation)
+        for claim in (
+            "Linux `.AppImage` | Yes, detached `.sig` | None",
+            "Linux `.deb` | No | None; package is unsigned",
+            "Windows NSIS `.exe` | Yes, detached `.sig` | Authenticode",
+            "Windows `.msi` | Yes, detached `.sig` | Authenticode",
+            "macOS `.app.tar.gz` | Yes, detached `.sig` | Contains a Developer ID signed and notarized app",
+            "macOS `.dmg` | No | Developer ID signed, notarized, and stapled",
+            "Checksums and SBOM artifact hashes are integrity metadata, not package signatures.",
+        ):
+            self.assertIn(claim, documentation)
+
     def test_streamlink_lanes_pass_installed_binary_output_to_rust(self):
         workflow = self.read(".github/workflows/next-ci.yml")
         rust_contract = self.read("next/src-tauri/tests/streamlink_contract.rs")
