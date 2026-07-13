@@ -122,7 +122,11 @@ pub fn build_playback_arguments(
             for argument in &player.arguments {
                 validate_text("player argument", argument)?;
             }
-            execution.extend(["--player-args".into(), player.arguments.join(" ").into()]);
+            let arguments =
+                shlex::try_join(player.arguments.iter().map(String::as_str)).map_err(|_| {
+                    ArgumentError::InvalidValue("player arguments cannot contain NUL bytes".into())
+                })?;
+            execution.extend(["--player-args".into(), arguments.into()]);
         }
     }
 

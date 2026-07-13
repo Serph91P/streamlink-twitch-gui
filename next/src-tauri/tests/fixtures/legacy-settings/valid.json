@@ -1,0 +1,5 @@
+{
+	"settings": "{\"settings\":{\"records\":{\"1\":{\"id\":\"1\",\"gui\":{\"theme\":\"dark\",\"language\":\"de\"},\"streaming\":{\"quality\":\"high\",\"player\":\"mpv\",\"players\":{\"mpv\":{\"exec\":\"/bin/sh\",\"args\":\"--force-window=yes --keep-open\"}},\"twitch_api_header\":\"fixture-sensitive-header\"},\"notification\":{\"enabled\":true}}}}}",
+	"channelsettings": "{\"channel-settings\":{\"records\":{\"42\":{\"id\":\"42\",\"streaming_quality\":\"audio\",\"streaming_low_latency\":true,\"streams_chat_open\":false,\"notification_enabled\":true}}}}",
+	"auth": "{\"auth\":{\"records\":{\"1\":{\"id\":\"1\",\"access_token\":\"fixture-oauth-token\",\"scope\":\"user:read:follows\"}}}}"
+}

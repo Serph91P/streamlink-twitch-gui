@@ -1,0 +1,4 @@
+{
+	"settings": "{\"settings\":{\"schemaVersion\":99,\"records\":{\"1\":{\"gui\":{\"theme\":\"neon\",\"language\":{\"code\":\"fr\"}},\"streaming\":{\"quality\":\"8k120\",\"player\":\"quantum\",\"players\":{\"quantum\":{\"exec\":42}}},\"notification\":{\"enabled\":\"sometimes\"},\"futureSetting\":true}}},\"futureNamespace\":{\"records\":{}}}",
+	"channelsettings": "{\"channel-settings\":{\"records\":{\"future\":{\"id\":\"future\",\"streaming_quality\":{\"adaptive\":true},\"futurePreference\":true}}}}"
+}

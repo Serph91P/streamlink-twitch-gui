@@ -1,20 +1,40 @@
 import { useState, type FormEvent } from "react";
 
-import type { SettingsBackend } from "../../api/backend";
+import type {
+  LegacyMigrationBackend,
+  LegacyMigrationPreview,
+  LegacyStorageSnapshot,
+  SettingsBackend,
+} from "../../api/backend";
 import type { Settings } from "../../domain/settings";
+
+const qualityNames: Record<Settings["quality"]["preference"], string> = {
+  best: "Best",
+  worst: "Worst",
+  audioOnly: "Audio only",
+};
+
+const themeNames: Record<Settings["theme"], string> = {
+  system: "System",
+  dark: "Dark",
+  light: "Light",
+};
 
 export function SettingsPanel({
   backend,
   settings: initialSettings,
   onSaved,
 }: {
-  backend: SettingsBackend;
+  backend: SettingsBackend & LegacyMigrationBackend;
   settings: Settings;
   onSaved: (settings: Settings) => void;
 }) {
   const [settings, setSettings] = useState(initialSettings);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [migration, setMigration] = useState<LegacyMigrationPreview>();
+  const [legacySnapshot, setLegacySnapshot] = useState<LegacyStorageSnapshot>();
+  const [migrationBusy, setMigrationBusy] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -32,6 +52,140 @@ export function SettingsPanel({
       );
     }
   }
+
+  async function selectLegacyExport(file: File | undefined) {
+    setError("");
+    setMessage("");
+    setMigration(undefined);
+    setLegacySnapshot(undefined);
+    if (!file) return;
+
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Legacy export must be a JSON object");
+      }
+      const allowed = new Set([
+        "settings",
+        "channelsettings",
+        "auth",
+        "search",
+        "window",
+        "versioncheck",
+        "app",
+      ]);
+      const snapshot: LegacyStorageSnapshot = {};
+      for (const [key, value] of Object.entries(parsed)) {
+        if (allowed.has(key) && typeof value === "string") {
+          Object.assign(snapshot, { [key]: value });
+        }
+      }
+      if (Object.keys(snapshot).length === 0) {
+        throw new Error(
+          "No supported legacy namespaces were found in this file",
+        );
+      }
+      setLegacySnapshot(snapshot);
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Could not read legacy export",
+      );
+    }
+  }
+
+  async function previewMigration() {
+    if (!legacySnapshot) return;
+    setError("");
+    setMessage("");
+    setMigrationBusy(true);
+    try {
+      setMigration(await backend.previewLegacyMigration(legacySnapshot));
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Could not preview legacy settings",
+      );
+    } finally {
+      setMigrationBusy(false);
+    }
+  }
+
+  async function importMigration() {
+    if (!legacySnapshot) return;
+    setError("");
+    setMessage("");
+    setMigrationBusy(true);
+    try {
+      const imported = await backend.confirmLegacyMigration(legacySnapshot);
+      setMigration(imported);
+      setSettings(imported.settings);
+      onSaved(imported.settings);
+      setMessage("Legacy settings imported");
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Could not import legacy settings",
+      );
+    } finally {
+      setMigrationBusy(false);
+    }
+  }
+
+  const safeMigrationRows =
+    migration?.status === "ready"
+      ? [
+          [
+            "Player executable",
+            settings.player.path ?? "Streamlink default",
+            migration.settings.player.path ?? "Streamlink default",
+          ],
+          [
+            "Player arguments",
+            settings.player.arguments.join("\n") || "None",
+            migration.settings.player.arguments.join("\n") || "None",
+          ],
+          [
+            "Quality preference",
+            qualityNames[settings.quality.preference],
+            qualityNames[migration.settings.quality.preference],
+          ],
+          [
+            "Maximum video height",
+            settings.quality.maximumHeight
+              ? `${settings.quality.maximumHeight}p`
+              : "No limit",
+            migration.settings.quality.maximumHeight
+              ? `${migration.settings.quality.maximumHeight}p`
+              : "No limit",
+          ],
+          [
+            "Maximum frame rate",
+            settings.quality.maximumFps
+              ? `${settings.quality.maximumFps} fps`
+              : "No limit",
+            migration.settings.quality.maximumFps
+              ? `${migration.settings.quality.maximumFps} fps`
+              : "No limit",
+          ],
+          ["Language", settings.language, migration.settings.language],
+          [
+            "Theme",
+            themeNames[settings.theme],
+            themeNames[migration.settings.theme],
+          ],
+          [
+            "Live channel notifications",
+            settings.notifications.liveChannels ? "Enabled" : "Disabled",
+            migration.settings.notifications.liveChannels
+              ? "Enabled"
+              : "Disabled",
+          ],
+        ]
+      : [];
 
   return (
     <>
@@ -208,6 +362,98 @@ export function SettingsPanel({
               }
             />
           </label>
+        </fieldset>
+        <fieldset className="migration-preview">
+          <legend>Legacy settings import</legend>
+          <p>
+            This app cannot access the separate NW.js Chromium profile
+            automatically. Select a namespace JSON export from the previous app
+            to preview it. The file remains unchanged, and plaintext credentials
+            are always skipped.
+          </p>
+          <label>
+            Legacy namespace export
+            <input
+              type="file"
+              accept="application/json,.json"
+              onChange={(event) =>
+                void selectLegacyExport(event.currentTarget.files?.[0])
+              }
+            />
+          </label>
+          <button
+            type="button"
+            disabled={migrationBusy || !legacySnapshot}
+            onClick={previewMigration}
+          >
+            Preview legacy import
+          </button>
+          {migration?.status === "noData" ? (
+            <p>No legacy settings were found.</p>
+          ) : null}
+          {migration?.status === "alreadyCompleted" ? (
+            <p>Legacy settings were already imported.</p>
+          ) : null}
+          {migration && migration.changes.length > 0 ? (
+            <ul className="migration-changes">
+              {migration.changes.map((change) =>
+                change.outcome === "skippedSensitive" ? (
+                  <li key={`${change.field}-${change.outcome}`}>
+                    <strong>Sensitive fields</strong>: skipped. Plaintext OAuth
+                    credentials are never imported.
+                  </li>
+                ) : (
+                  <li key={`${change.field}-${change.outcome}`}>
+                    <strong>{change.field}</strong>: {change.outcome}.{" "}
+                    {change.detail}
+                  </li>
+                ),
+              )}
+            </ul>
+          ) : null}
+          {migration?.channels.map((channel) => (
+            <section key={channel.channelId}>
+              <h3>Channel {channel.channelId}</h3>
+              <ul className="migration-changes">
+                {channel.preferences.map((preference) => (
+                  <li key={preference.field}>
+                    <strong>{preference.field}</strong>: {preference.outcome}.{" "}
+                    {preference.detail}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+          {safeMigrationRows.length > 0 ? (
+            <>
+              <table className="migration-values">
+                <caption>Current and proposed safe settings</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Setting</th>
+                    <th scope="col">Current</th>
+                    <th scope="col">Proposed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {safeMigrationRows.map(([label, current, proposed]) => (
+                    <tr key={label}>
+                      <th scope="row">{label}</th>
+                      <td>{current}</td>
+                      <td>{proposed}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button
+                type="button"
+                disabled={migrationBusy}
+                onClick={importMigration}
+              >
+                Import supported settings
+              </button>
+            </>
+          ) : null}
         </fieldset>
         {error ? <p role="alert">{error}</p> : null}
         {message ? <p role="status">{message}</p> : null}

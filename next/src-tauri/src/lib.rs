@@ -1,5 +1,6 @@
 pub mod desktop;
 pub mod domain;
+pub mod migration;
 pub mod settings;
 pub mod streamlink;
 pub mod twitch;
@@ -26,6 +27,13 @@ pub fn run() {
             let settings_path = app.path().app_config_dir()?.join("settings.json");
             let settings_store = settings::SettingsStore::new(settings_path);
             let startup_settings = settings_store.load()?;
+            let migration_marker = app
+                .path()
+                .app_config_dir()?
+                .join("legacy-migration-complete");
+            app.manage(migration::LegacyMigrationState(
+                migration::LegacyMigrator::new(settings_store.clone(), migration_marker),
+            ));
             app.manage(settings::SettingsState(settings_store));
             app.manage(desktop::RuntimeSettings::new(&startup_settings));
             app.manage(streamlink::commands::PlaybackState::new());
@@ -59,6 +67,8 @@ pub fn run() {
             streamlink::commands::stop_stream,
             settings::get_settings,
             settings::save_settings,
+            migration::preview_legacy_migration,
+            migration::confirm_legacy_migration,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Streamlink Twitch GUI");

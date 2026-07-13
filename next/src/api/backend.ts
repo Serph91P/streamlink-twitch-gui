@@ -44,6 +44,41 @@ export interface SettingsBackend {
   saveSettings(settings: Settings): Promise<Settings>;
 }
 
+export type MigrationOutcome =
+  "imported" | "unsupported" | "skippedSensitive" | "invalid";
+
+export interface MigrationChange {
+  field: string;
+  outcome: MigrationOutcome;
+  detail: string;
+}
+
+export interface LegacyMigrationPreview {
+  status: "ready" | "noData" | "completed" | "alreadyCompleted";
+  settings: Settings;
+  changes: MigrationChange[];
+  channels: Array<{ channelId: string; preferences: MigrationChange[] }>;
+}
+
+export interface LegacyStorageSnapshot {
+  settings?: string;
+  channelsettings?: string;
+  auth?: string;
+  search?: string;
+  window?: string;
+  versioncheck?: string;
+  app?: string;
+}
+
+export interface LegacyMigrationBackend {
+  previewLegacyMigration(
+    snapshot: LegacyStorageSnapshot,
+  ): Promise<LegacyMigrationPreview>;
+  confirmLegacyMigration(
+    snapshot: LegacyStorageSnapshot,
+  ): Promise<LegacyMigrationPreview>;
+}
+
 export interface TwitchBackend {
   getSession(signal?: AbortSignal): Promise<TwitchSession>;
   beginTwitchLogin(signal?: AbortSignal): Promise<TwitchLoginChallenge>;
@@ -84,7 +119,10 @@ export interface TwitchBackend {
   ): Promise<TwitchPage<TwitchGame>>;
 }
 
-export type AppBackend = TwitchBackend & PlaybackBackend & SettingsBackend;
+export type AppBackend = TwitchBackend &
+  PlaybackBackend &
+  SettingsBackend &
+  LegacyMigrationBackend;
 
 type BackendOverrides = Partial<{
   [Key in keyof AppBackend]: AppBackend[Key];
@@ -242,6 +280,23 @@ export class TauriBackend implements AppBackend {
   saveSettings(settings: Settings): Promise<Settings> {
     return invoke("save_settings", { settings });
   }
+
+  previewLegacyMigration(
+    snapshot: LegacyStorageSnapshot,
+  ): Promise<LegacyMigrationPreview> {
+    return invoke("preview_legacy_migration", {
+      snapshot,
+    });
+  }
+
+  confirmLegacyMigration(
+    snapshot: LegacyStorageSnapshot,
+  ): Promise<LegacyMigrationPreview> {
+    return invoke("confirm_legacy_migration", {
+      snapshot,
+      confirmed: true,
+    });
+  }
 }
 
 export class BrowserBackend implements AppBackend {
@@ -377,5 +432,31 @@ export class BrowserBackend implements AppBackend {
 
   async saveSettings(settings: Settings): Promise<Settings> {
     return this.overrides.saveSettings?.(settings) ?? settings;
+  }
+
+  async previewLegacyMigration(
+    snapshot: LegacyStorageSnapshot,
+  ): Promise<LegacyMigrationPreview> {
+    return (
+      this.overrides.previewLegacyMigration?.(snapshot) ?? {
+        status: "noData",
+        settings: defaultSettings,
+        changes: [],
+        channels: [],
+      }
+    );
+  }
+
+  async confirmLegacyMigration(
+    snapshot: LegacyStorageSnapshot,
+  ): Promise<LegacyMigrationPreview> {
+    return (
+      this.overrides.confirmLegacyMigration?.(snapshot) ?? {
+        status: "completed",
+        settings: defaultSettings,
+        changes: [],
+        channels: [],
+      }
+    );
   }
 }
