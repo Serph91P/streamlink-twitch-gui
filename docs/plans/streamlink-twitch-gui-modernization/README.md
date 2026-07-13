@@ -1,5 +1,8 @@
 # Streamlink Twitch GUI Rewrite Implementation Plan
 
+> [!NOTE]
+> Signed release items are superseded for the current unsigned community channel and retained only as a future signed-production proposal. Follow the [current unsigned community runbook](../../rewrite/releasing.md).
+
 > **For Hermes:** Execute this plan through Hermes Kanban with isolated worktrees, one implementation card at a time, followed by independent review. Every implementation branch starts from current `origin/develop` and every pull request targets `develop`.
 
 **Goal:** Replace the unsupported Ember/NW.js application with a secure, maintainable Tauri desktop application that supports current Streamlink, Twitch Helix, H.265/HEVC, AV1, dynamic 1440p and automated cross-platform builds.

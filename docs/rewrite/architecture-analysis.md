@@ -323,7 +323,7 @@ validated global settings
 5. **Migrate catalog and playback.** Add normalized Helix queries, dynamic variants, concurrent playback, modal/status replacement, chat, and desktop integrations behind tested interfaces.
 6. **Import data safely.** Discover legacy profiles without changing them, parse all three namespaces defensively, show a preview, require confirmation, import supported non-secrets atomically, and provide rollback. Re-enter secrets.
 7. **Run both contracts.** Keep legacy and rewrite suites plus cross-platform package smoke tests until all retained critical journeys pass.
-8. **Cut over deliberately.** Publish signed prereleases, test updater metadata and rollback, document removed behavior, then remove legacy runtime/build reachability in a separately reviewed change.
+8. **Cut over deliberately.** For a separately approved future signed-production migration, publish signed prereleases, test updater metadata and rollback, document removed behavior, then remove legacy runtime/build reachability in a separately reviewed change. The current unsigned community channel follows the [unsigned community release runbook](releasing.md) and its manual draft/package checks; signing and updater metadata are not current requirements.
 
 The migration must not carry forward arbitrary custom commands without a threat-model decision. Custom player/chat profiles should become validated typed profiles. If unrestricted custom execution is retained for expert users, isolate it behind explicit consent and never grant that capability to remote content.
 
@@ -368,7 +368,7 @@ The migration must not carry forward arbitrary custom commands without a threat-
 
 - [ ] The Tauri feasibility gate passes on Windows x64, macOS x64/arm64, Linux x64 X11, Linux x64 Wayland, and the supported webtop/container; any graphics workaround is scoped to a reproduced environment.
 - [ ] Pull requests run formatting, lint, type checks, frontend tests, Rust tests, Streamlink contract tests, security checks, and non-release package smoke builds.
-- [ ] Release workflows produce signed Windows installers, notarized macOS artifacts, Linux packages, SHA-256 checksums, SBOMs, and signed updater metadata from immutable action SHAs.
+- [ ] **Future signed-production target requiring separate approval:** Release workflows produce signed Windows installers, notarized macOS artifacts, Linux packages, SHA-256 checksums, SBOMs, and signed updater metadata from immutable action SHAs. The current unsigned community channel follows the [unsigned community runbook](releasing.md).
 - [ ] Install, upgrade, rollback, player paths with spaces and Unicode, H.264 playback, and conditional HEVC/AV1 behavior pass on each supported platform.
 - [ ] Release documentation states Streamlink/player prerequisites, codec and hardware limitations, package-specific update ownership, retained/removed legacy behavior, and recovery procedures.
 
