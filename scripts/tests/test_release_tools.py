@@ -610,7 +610,14 @@ class NativeReleaseContractTests(unittest.TestCase):
         def normalized(relative_path: str) -> str:
             return " ".join(self.read(relative_path).lower().split())
 
-        report = normalized("docs/rewrite/final-verification-report.md")
+        report_lines = self.read(
+            "docs/rewrite/final-verification-report.md"
+        ).splitlines()
+        self.assertEqual(
+            report_lines[:3],
+            ["# Final modernization verification report", "", "> [!IMPORTANT]"],
+        )
+        report_notice = report_lines[3].lower()
         for claim in (
             "historical for exact revision `8d3f5c78a13bcf1ed487ceb4c20b1f9124d32e8b`",
             "superseded for current release operations",
@@ -618,9 +625,21 @@ class NativeReleaseContractTests(unittest.TestCase):
             "not current unsigned-community gates",
             "](releasing.md)",
         ):
-            self.assertIn(claim, report)
+            self.assertIn(claim, report_notice)
 
         architecture = normalized("docs/rewrite/architecture-analysis.md")
+        migration = architecture.split(
+            "## migration boundaries and sequence", 1
+        )[1].split("## testable acceptance criteria", 1)[0]
+        for claim in (
+            "separately approved future signed-production migration",
+            "current unsigned community channel",
+            "](releasing.md)",
+            "manual draft/package checks",
+            "signing and updater metadata are not current requirements",
+        ):
+            self.assertIn(claim, migration)
+
         delivery = architecture.split("### platform and delivery", 1)[1].split(
             "## source index", 1
         )[0]
