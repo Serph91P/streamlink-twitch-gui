@@ -6,7 +6,7 @@
 Streamlink Twitch GUI is a desktop client for browsing Twitch and opening streams through [Streamlink](https://streamlink.github.io/). The project is being rebuilt as a Tauri 2 application with a React and TypeScript frontend and a Rust backend.
 
 > [!IMPORTANT]
-> The new application is under active development and is not yet a feature-complete replacement for the legacy application. Releases are built from `main`.
+> The new application is under active development and is not yet a feature-complete replacement for the legacy application. Changes are reviewed on `develop`; only a push to `main` can build a draft release candidate.
 
 ## Current Architecture
 
@@ -32,10 +32,15 @@ Twitch authentication uses Twitch's device authorization flow. A build must be c
 
 Download packages from this repository's [Releases page](https://github.com/Serph91P/streamlink-twitch-gui/releases):
 
-- Windows x64: NSIS `.exe` installer
-- Linux amd64: Debian `.deb` package
+- Windows x64: NSIS `.exe` and MSI installers
+- Linux x64: AppImage and Debian `.deb` package
+- macOS x64: application archive and DMG
+- macOS arm64: application archive and DMG
 
-Current packages are unsigned. Windows SmartScreen may warn about the installer, and Linux package authenticity is not cryptographically attested. macOS and 32-bit packages are not produced by the current release workflow.
+The next release workflow is draft-only and requires Windows code signing,
+Apple Developer ID signing and notarization, and Tauri updater signatures.
+Only manually published drafts that pass the documented verification gate are
+release candidates. See [`docs/rewrite/releasing.md`](docs/rewrite/releasing.md).
 
 ## Development
 
@@ -80,7 +85,7 @@ Start a development build from `next/` after setting `TWITCH_CLIENT_ID` in the b
 npm run tauri dev
 ```
 
-Release packages are built by [`.github/workflows/next-release.yml`](.github/workflows/next-release.yml). Pushes to `main` produce stable releases. See [`docs/rewrite/releasing.md`](docs/rewrite/releasing.md) for the versioning and publishing contract.
+Release packages are built by [`.github/workflows/next-release.yml`](.github/workflows/next-release.yml) only when a commit is pushed to `main`. The workflow binds all builds and generated metadata to that triggering commit, creates a draft, and never publishes it automatically. See [`docs/rewrite/releasing.md`](docs/rewrite/releasing.md) for the signing and publication contract.
 
 ## Contributing
 
