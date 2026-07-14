@@ -242,20 +242,20 @@ jobs:
           Review SHA256SUMS and the CycloneDX SBOM as integrity evidence only, not as proof of publisher identity.
           EOF
           )
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)
-            if [[ "$draft" != true ]]; then
-              echo "Refusing to modify published release $RELEASE_TAG" >&2
-              exit 1
-            fi
-            existing_target=$(gh release view "$RELEASE_TAG" --json targetCommitish --jq .targetCommitish)
-            if [[ "$existing_target" != "$TARGET_SHA" ]]; then
-              echo "Refusing to retarget draft $RELEASE_TAG from $existing_target" >&2
-              exit 1
-            fi
-            python3 scripts/verify_release_tag.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target-sha "$TARGET_SHA"
-            gh release edit "$RELEASE_TAG" --draft --target "$TARGET_SHA" --title "$release_title" --notes "$release_notes"
-            release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq .id)
+          release_id_output=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.tag_name == env.RELEASE_TAG) | (.id // "invalid")')
+          release_ids=()
+          if [[ -n "$release_id_output" ]]; then
+            mapfile -t release_ids <<< "$release_id_output"
+          fi
+          if [[ ${#release_ids[@]} -gt 1 ]]; then
+            echo "Refusing to choose between duplicate releases for $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          if [[ ${#release_ids[@]} -eq 1 ]]; then
+            release_id=${release_ids[0]}
+            python3 scripts/verify_release_tag.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target-sha "$TARGET_SHA" --require-draft-release --release-id "$release_id"
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -f tag_name="$RELEASE_TAG" -f target_commitish="$TARGET_SHA" -f name="$release_title" -f body="$release_notes" -F draft=true >/dev/null
             asset_ids=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" --jq '.[].id')
             while IFS= read -r asset_id; do
               if [[ -n "$asset_id" ]]; then
@@ -264,9 +264,12 @@ jobs:
             done <<< "$asset_ids"
           else
             python3 scripts/verify_release_tag.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target-sha "$TARGET_SHA" --allow-missing
-            gh release create "$RELEASE_TAG" --draft --target "$TARGET_SHA" --title "$release_title" --notes "$release_notes"
-            python3 scripts/verify_release_tag.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target-sha "$TARGET_SHA"
+            release_id=$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$RELEASE_TAG" -f target_commitish="$TARGET_SHA" -f name="$release_title" -f body="$release_notes" -F draft=true --jq .id)
+            python3 scripts/verify_release_tag.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target-sha "$TARGET_SHA" --require-draft-release --release-id "$release_id"
           fi
-          gh release upload "$RELEASE_TAG" release-assets/* --clobber
-          [[ $(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft) == true ]]
-          [[ $(gh release view "$RELEASE_TAG" --json targetCommitish --jq .targetCommitish) == "$TARGET_SHA" ]]
+          for asset_path in release-assets/*; do
+            asset_name=${asset_path##*/}
+            gh api --method POST "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$asset_name" -H "Content-Type: application/octet-stream" --input "$asset_path" >/dev/null
+          done
+          [[ $(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq .draft) == true ]]
+          [[ $(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq .target_commitish) == "$TARGET_SHA" ]]
