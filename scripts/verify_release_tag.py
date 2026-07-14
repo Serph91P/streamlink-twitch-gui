@@ -61,17 +61,42 @@ def verify_tag(
     target_sha: str,
     fetch_json: FetchJson,
     allow_missing: bool = False,
+    require_draft_release: bool = False,
 ) -> str | None:
     target_sha = validate_target_sha(target_sha)
     tag_sha = resolve_tag_commit(repository, tag, fetch_json)
     if tag_sha is None:
-        if allow_missing:
-            return None
-        raise ValueError(f"release tag {tag} does not exist")
-    if tag_sha != target_sha:
+        if not allow_missing and not require_draft_release:
+            raise ValueError(f"release tag {tag} does not exist")
+    elif tag_sha != target_sha:
         raise ValueError(
             f"release tag {tag} resolves to {tag_sha}, which does not match target {target_sha}"
         )
+
+    if require_draft_release:
+        repository_path = _repository_path(repository)
+        release_path = (
+            f"/repos/{repository_path}/releases/tags/{quote(tag, safe='')}"
+        )
+        release = fetch_json(release_path, False)
+        try:
+            is_draft = release["draft"]
+            release_tag = release["tag_name"]
+            target_commitish = release["target_commitish"]
+        except (KeyError, TypeError) as error:
+            raise ValueError(
+                f"invalid GitHub draft release response from {release_path}"
+            ) from error
+        if is_draft is not True:
+            raise ValueError(f"release {tag} is not a draft")
+        if release_tag != tag:
+            raise ValueError(
+                f"draft release tag {release_tag!r} does not match expected tag {tag!r}"
+            )
+        if target_commitish != target_sha:
+            raise ValueError(
+                f"draft release target {target_commitish!r} does not match target {target_sha}"
+            )
     return tag_sha
 
 
@@ -107,7 +132,9 @@ def main() -> None:
     parser.add_argument("--repository", required=True)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--target-sha", required=True)
-    parser.add_argument("--allow-missing", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--allow-missing", action="store_true")
+    mode.add_argument("--require-draft-release", action="store_true")
     args = parser.parse_args()
 
     token = os.environ.get("GH_TOKEN")
@@ -119,8 +146,11 @@ def main() -> None:
         args.target_sha,
         github_fetch_json(token),
         args.allow_missing,
+        args.require_draft_release,
     )
-    if result is None:
+    if args.require_draft_release:
+        print(f"verified draft release {args.tag} for target {args.target_sha}")
+    elif result is None:
         print(f"release tag {args.tag} does not exist and may be created")
     else:
         print(f"verified release tag {args.tag} at {result}")

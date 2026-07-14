@@ -417,6 +417,50 @@ class ReleaseTagTests(unittest.TestCase):
                 self.repository, self.tag, self.target_sha, fetch_json
             )
 
+    def test_missing_tag_is_bound_to_exact_draft_release_metadata(self):
+        import verify_release_tag
+
+        release_path = f"/repos/{self.repository}/releases/tags/{self.tag}"
+        release = {
+            "draft": True,
+            "tag_name": self.tag,
+            "target_commitish": self.target_sha,
+        }
+
+        def fetch_json(path, allow_not_found=False):
+            if allow_not_found:
+                return None
+            self.assertEqual(path, release_path)
+            return release
+
+        self.assertIsNone(
+            verify_release_tag.verify_tag(
+                self.repository,
+                self.tag,
+                self.target_sha,
+                fetch_json,
+                require_draft_release=True,
+            )
+        )
+
+        invalid_releases = (
+            {},
+            {**release, "draft": False},
+            {**release, "tag_name": "v9.9.9"},
+            {**release, "target_commitish": "b" * 40},
+        )
+        for invalid_release in invalid_releases:
+            with self.subTest(release=invalid_release), self.assertRaises(ValueError):
+                release.clear()
+                release.update(invalid_release)
+                verify_release_tag.verify_tag(
+                    self.repository,
+                    self.tag,
+                    self.target_sha,
+                    fetch_json,
+                    require_draft_release=True,
+                )
+
 
 class NativeReleaseContractTests(unittest.TestCase):
     root = SCRIPTS.parent
@@ -460,19 +504,20 @@ class NativeReleaseContractTests(unittest.TestCase):
             '--tag "$RELEASE_TAG" --target-sha "$TARGET_SHA"'
         )
         allow_missing = f"{verification} --allow-missing"
+        require_draft = f"{verification} --require-draft-release"
         edit = 'gh release edit "$RELEASE_TAG"'
         create = 'gh release create "$RELEASE_TAG"'
-        verification_lines = [
+        draft_verification_lines = [
             line.strip()
             for line in workflow.splitlines()
-            if line.strip() == verification
+            if line.strip() == require_draft
         ]
 
-        self.assertEqual(len(verification_lines), 2)
+        self.assertEqual(len(draft_verification_lines), 2)
         self.assertIn(allow_missing, workflow)
-        self.assertLess(workflow.index(verification), workflow.index(edit))
+        self.assertLess(workflow.index(require_draft), workflow.index(edit))
         self.assertLess(workflow.index(allow_missing), workflow.index(create))
-        self.assertLess(workflow.index(create), workflow.rindex(verification))
+        self.assertLess(workflow.index(create), workflow.rindex(require_draft))
 
     def test_reused_draft_assets_are_deleted_before_upload(self):
         workflow = self.read(".github/workflows/next-release.yml")
