@@ -683,6 +683,28 @@ class NativeReleaseContractTests(unittest.TestCase):
         self.assertIn('[[ "$previous_target" =~ ^[0-9a-f]{40}$ ]]', workflow)
         self.assertIn('[[ "$previous_target" != "$target" ]]', workflow)
 
+    def test_release_source_rejects_zero_previous_target(self):
+        workflow = self.read(".github/workflows/next-release.yml")
+
+        self.assertIn(
+            '[[ "$previous_target" != 0000000000000000000000000000000000000000 ]]',
+            workflow,
+        )
+
+    def test_release_source_rejects_non_ancestor_previous_target(self):
+        workflow = self.read(".github/workflows/next-release.yml")
+        previous_commit = 'git cat-file -e "$previous_target^{commit}"'
+        target_commit = 'git cat-file -e "$target^{commit}"'
+        ancestry = 'git merge-base --is-ancestor "$previous_target" "$target"'
+        export = 'echo "version=$version"'
+
+        self.assertIn(previous_commit, workflow)
+        self.assertIn(target_commit, workflow)
+        self.assertIn(ancestry, workflow)
+        self.assertLess(workflow.index(previous_commit), workflow.index(export))
+        self.assertLess(workflow.index(target_commit), workflow.index(export))
+        self.assertLess(workflow.index(ancestry), workflow.index(export))
+
     def test_release_metadata_is_bound_to_triggering_commit(self):
         workflow = self.read(".github/workflows/next-release.yml")
 

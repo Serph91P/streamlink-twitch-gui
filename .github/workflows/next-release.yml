@@ -43,7 +43,11 @@ jobs:
           previous_target=$PREVIOUS_TARGET_SHA
           [[ "$target" =~ ^[0-9a-f]{40}$ ]]
           [[ "$previous_target" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$previous_target" != 0000000000000000000000000000000000000000 ]]
           [[ "$previous_target" != "$target" ]]
+          git cat-file -e "$previous_target^{commit}"
+          git cat-file -e "$target^{commit}"
+          git merge-base --is-ancestor "$previous_target" "$target"
           version=$(python3 - <<'PY'
           import json
           import tomllib
