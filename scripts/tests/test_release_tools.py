@@ -367,7 +367,47 @@ class ReleaseTagTests(unittest.TestCase):
     repository = "owner/project"
     tag = "v1.2.3"
     target_sha = "a" * 40
+    previous_target_sha = "b" * 40
     release_id = "353669835"
+
+    def verify_draft_transition(
+        self,
+        release_target,
+        *,
+        target_sha=None,
+        previous_target_sha=None,
+        response_id=None,
+        draft=True,
+    ):
+        import verify_release_tag
+
+        target_sha = target_sha or self.target_sha
+        previous_target_sha = previous_target_sha or self.previous_target_sha
+        response_id = response_id or int(self.release_id)
+        ref_path = f"/repos/{self.repository}/git/ref/tags/{self.tag}"
+        release_path = f"/repos/{self.repository}/releases/{self.release_id}"
+
+        def fetch_json(path, allow_not_found=False):
+            if path == ref_path and allow_not_found:
+                return None
+            self.assertEqual(path, release_path)
+            return {
+                "url": f"https://api.github.com{release_path}",
+                "id": response_id,
+                "draft": draft,
+                "tag_name": self.tag,
+                "target_commitish": release_target,
+            }
+
+        return verify_release_tag.verify_tag(
+            self.repository,
+            self.tag,
+            target_sha,
+            fetch_json,
+            require_draft_release=True,
+            release_id=self.release_id,
+            previous_target_sha=previous_target_sha,
+        )
 
     def test_existing_tags_are_peeled_and_must_match_the_target(self):
         import verify_release_tag
@@ -464,6 +504,7 @@ class ReleaseTagTests(unittest.TestCase):
             {**release, "draft": False},
             {**release, "tag_name": "v9.9.9"},
             {**release, "target_commitish": "b" * 40},
+            {**release, "target_commitish": None},
         )
         for invalid_release in invalid_releases:
             with self.subTest(release=invalid_release), self.assertRaises(ValueError):
@@ -477,6 +518,90 @@ class ReleaseTagTests(unittest.TestCase):
                     require_draft_release=True,
                     release_id=self.release_id,
                 )
+
+    def test_existing_draft_may_transition_from_previous_target(self):
+        self.assertIsNone(self.verify_draft_transition(self.previous_target_sha))
+
+    def test_draft_transition_rejects_wrong_previous_or_new_target(self):
+        cases = (
+            (self.previous_target_sha, self.target_sha, "c" * 40),
+            (self.target_sha, "c" * 40, self.previous_target_sha),
+            (None, self.target_sha, self.previous_target_sha),
+        )
+        for release_target, target_sha, previous_target_sha in cases:
+            with self.subTest(
+                release_target=release_target,
+                target_sha=target_sha,
+                previous_target_sha=previous_target_sha,
+            ), self.assertRaisesRegex(ValueError, "does not match"):
+                self.verify_draft_transition(
+                    release_target,
+                    target_sha=target_sha,
+                    previous_target_sha=previous_target_sha,
+                )
+
+    def test_draft_transition_rejects_wrong_release_id(self):
+        with self.assertRaisesRegex(ValueError, "does not match expected ID"):
+            self.verify_draft_transition(
+                self.previous_target_sha, response_id=int(self.release_id) + 1
+            )
+
+    def test_draft_transition_rejects_published_release(self):
+        with self.assertRaisesRegex(ValueError, "is not a draft"):
+            self.verify_draft_transition(self.previous_target_sha, draft=False)
+
+    def test_draft_transition_rejects_malformed_or_equal_targets(self):
+        import verify_release_tag
+
+        def fetch_json(_path, _allow_not_found=False):
+            raise AssertionError("invalid targets must fail before API requests")
+
+        malformed_targets = ("", "a" * 39, "a" * 41, "A" * 40, "g" * 40)
+        for argument in ("target_sha", "previous_target_sha"):
+            for malformed_target in malformed_targets:
+                arguments = {
+                    "target_sha": self.target_sha,
+                    "previous_target_sha": self.previous_target_sha,
+                }
+                arguments[argument] = malformed_target
+                with self.subTest(
+                    argument=argument, value=malformed_target
+                ), self.assertRaisesRegex(ValueError, "lowercase 40-character"):
+                    verify_release_tag.verify_tag(
+                        self.repository,
+                        self.tag,
+                        arguments["target_sha"],
+                        fetch_json,
+                        require_draft_release=True,
+                        release_id=self.release_id,
+                        previous_target_sha=arguments["previous_target_sha"],
+                    )
+
+        with self.assertRaisesRegex(ValueError, "must differ"):
+            verify_release_tag.verify_tag(
+                self.repository,
+                self.tag,
+                self.target_sha,
+                fetch_json,
+                require_draft_release=True,
+                release_id=self.release_id,
+                previous_target_sha=self.target_sha,
+            )
+
+    def test_previous_target_is_restricted_to_draft_verification(self):
+        import verify_release_tag
+
+        def fetch_json(_path, _allow_not_found=False):
+            raise AssertionError("invalid mode must fail before API requests")
+
+        with self.assertRaisesRegex(ValueError, "requires draft"):
+            verify_release_tag.verify_tag(
+                self.repository,
+                self.tag,
+                self.target_sha,
+                fetch_json,
+                previous_target_sha=self.previous_target_sha,
+            )
 
     def test_draft_release_rejects_unsafe_ids_before_release_request(self):
         import verify_release_tag
@@ -554,6 +679,31 @@ class NativeReleaseContractTests(unittest.TestCase):
         self.assertNotIn("inputs.", workflow)
         self.assertIn('[[ "$GITHUB_REF" == refs/heads/main ]]', workflow)
         self.assertIn('[[ "$target" == "$GITHUB_SHA" ]]', workflow)
+        self.assertIn("PREVIOUS_TARGET_SHA: ${{ github.event.before }}", workflow)
+        self.assertIn('[[ "$previous_target" =~ ^[0-9a-f]{40}$ ]]', workflow)
+        self.assertIn('[[ "$previous_target" != "$target" ]]', workflow)
+
+    def test_release_source_rejects_zero_previous_target(self):
+        workflow = self.read(".github/workflows/next-release.yml")
+
+        self.assertIn(
+            '[[ "$previous_target" != 0000000000000000000000000000000000000000 ]]',
+            workflow,
+        )
+
+    def test_release_source_rejects_non_ancestor_previous_target(self):
+        workflow = self.read(".github/workflows/next-release.yml")
+        previous_commit = 'git cat-file -e "$previous_target^{commit}"'
+        target_commit = 'git cat-file -e "$target^{commit}"'
+        ancestry = 'git merge-base --is-ancestor "$previous_target" "$target"'
+        export = 'echo "version=$version"'
+
+        self.assertIn(previous_commit, workflow)
+        self.assertIn(target_commit, workflow)
+        self.assertIn(ancestry, workflow)
+        self.assertLess(workflow.index(previous_commit), workflow.index(export))
+        self.assertLess(workflow.index(target_commit), workflow.index(export))
+        self.assertLess(workflow.index(ancestry), workflow.index(export))
 
     def test_release_metadata_is_bound_to_triggering_commit(self):
         workflow = self.read(".github/workflows/next-release.yml")
@@ -578,17 +728,28 @@ class NativeReleaseContractTests(unittest.TestCase):
         require_draft = (
             f'{verification} --require-draft-release --release-id "$release_id"'
         )
+        allow_previous_target = (
+            f'{require_draft} --previous-target-sha "$PREVIOUS_TARGET_SHA"'
+        )
         edit = 'gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id"'
         create = 'gh api --method POST "repos/$GITHUB_REPOSITORY/releases"'
-        draft_verification_lines = [
+        exact_draft_verification_lines = [
             line.strip()
             for line in workflow.splitlines()
             if line.strip() == require_draft
         ]
 
-        self.assertEqual(len(draft_verification_lines), 2)
+        self.assertEqual(exact_draft_verification_lines, [require_draft])
+        self.assertEqual(
+            [
+                line.strip()
+                for line in workflow.splitlines()
+                if line.strip() == allow_previous_target
+            ],
+            [allow_previous_target],
+        )
         self.assertIn(allow_missing, workflow)
-        self.assertLess(workflow.index(require_draft), workflow.index(edit))
+        self.assertLess(workflow.index(allow_previous_target), workflow.index(edit))
         self.assertLess(workflow.index(allow_missing), workflow.index(create))
         self.assertLess(workflow.index(create), workflow.rindex(require_draft))
 
@@ -596,9 +757,14 @@ class NativeReleaseContractTests(unittest.TestCase):
         workflow = self.read(".github/workflows/next-release.yml")
 
         release_list = 'repos/$GITHUB_REPOSITORY/releases?per_page=100'
+        duplicate_rejection = "if [[ ${#release_ids[@]} -gt 1 ]]; then"
+        transition_verification = '--previous-target-sha "$PREVIOUS_TARGET_SHA"'
         self.assertIn(release_list, workflow)
         self.assertIn(".tag_name == env.RELEASE_TAG", workflow)
-        self.assertIn("${#release_ids[@]} -gt 1", workflow)
+        self.assertIn(duplicate_rejection, workflow)
+        self.assertLess(
+            workflow.index(duplicate_rejection), workflow.index(transition_verification)
+        )
         self.assertNotIn("releases/tags/$RELEASE_TAG", workflow)
 
     def test_reused_draft_assets_are_deleted_before_upload(self):

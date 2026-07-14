@@ -74,8 +74,15 @@ def verify_tag(
     allow_missing: bool = False,
     require_draft_release: bool = False,
     release_id: str | None = None,
+    previous_target_sha: str | None = None,
 ) -> str | None:
     target_sha = validate_target_sha(target_sha)
+    if previous_target_sha is not None:
+        previous_target_sha = validate_target_sha(previous_target_sha)
+        if not require_draft_release:
+            raise ValueError("previous target SHA requires draft release verification")
+        if previous_target_sha == target_sha:
+            raise ValueError("previous and new target SHAs must differ")
     if not tag.startswith("v"):
         raise ValueError("release tag must use the v<version> format")
     validate_version(tag[1:])
@@ -118,9 +125,12 @@ def verify_tag(
             raise ValueError(
                 f"draft release tag {release_tag!r} does not match expected tag {tag!r}"
             )
-        if target_commitish != target_sha:
+        if target_commitish != target_sha and (
+            previous_target_sha is None or target_commitish != previous_target_sha
+        ):
             raise ValueError(
-                f"draft release target {target_commitish!r} does not match target {target_sha}"
+                f"draft release target {target_commitish!r} does not match "
+                f"new target {target_sha} or previous target {previous_target_sha}"
             )
     return tag_sha
 
@@ -161,6 +171,7 @@ def main() -> None:
     mode.add_argument("--allow-missing", action="store_true")
     mode.add_argument("--require-draft-release", action="store_true")
     parser.add_argument("--release-id")
+    parser.add_argument("--previous-target-sha")
     args = parser.parse_args()
 
     token = os.environ.get("GH_TOKEN")
@@ -174,6 +185,7 @@ def main() -> None:
         args.allow_missing,
         args.require_draft_release,
         args.release_id,
+        args.previous_target_sha,
     )
     if args.require_draft_release:
         print(f"verified draft release {args.tag} for target {args.target_sha}")

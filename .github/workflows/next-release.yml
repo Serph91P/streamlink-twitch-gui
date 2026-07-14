@@ -25,18 +25,29 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
       target: ${{ steps.release.outputs.target }}
+      previous_target: ${{ steps.release.outputs.previous_target }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - name: Bind release to the triggering main commit
         id: release
+        env:
+          PREVIOUS_TARGET_SHA: ${{ github.event.before }}
         shell: bash
         run: |
           [[ "$GITHUB_EVENT_NAME" == push ]]
           [[ "$GITHUB_REF" == refs/heads/main ]]
           target=$(git rev-parse HEAD)
           [[ "$target" == "$GITHUB_SHA" ]]
+          previous_target=$PREVIOUS_TARGET_SHA
+          [[ "$target" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$previous_target" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$previous_target" != 0000000000000000000000000000000000000000 ]]
+          [[ "$previous_target" != "$target" ]]
+          git cat-file -e "$previous_target^{commit}"
+          git cat-file -e "$target^{commit}"
+          git merge-base --is-ancestor "$previous_target" "$target"
           version=$(python3 - <<'PY'
           import json
           import tomllib
@@ -58,6 +69,7 @@ jobs:
             echo "version=$version"
             echo "tag=$tag"
             echo "target=$target"
+            echo "previous_target=$previous_target"
           } >> "$GITHUB_OUTPUT"
 
   validate:
@@ -229,6 +241,7 @@ jobs:
           RELEASE_TAG: ${{ needs.version.outputs.tag }}
           RELEASE_VERSION: ${{ needs.version.outputs.version }}
           TARGET_SHA: ${{ needs.version.outputs.target }}
+          PREVIOUS_TARGET_SHA: ${{ needs.version.outputs.previous_target }}
         shell: bash
         run: |
           release_title="UNSIGNED COMMUNITY BUILD - Streamlink Twitch GUI $RELEASE_VERSION"
@@ -254,7 +267,7 @@ jobs:
 
           if [[ ${#release_ids[@]} -eq 1 ]]; then
             release_id=${release_ids[0]}
-            python3 scripts/verify_release_tag.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target-sha "$TARGET_SHA" --require-draft-release --release-id "$release_id"
+            python3 scripts/verify_release_tag.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target-sha "$TARGET_SHA" --require-draft-release --release-id "$release_id" --previous-target-sha "$PREVIOUS_TARGET_SHA"
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -f tag_name="$RELEASE_TAG" -f target_commitish="$TARGET_SHA" -f name="$release_title" -f body="$release_notes" -F draft=true >/dev/null
             asset_ids=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" --jq '.[].id')
             while IFS= read -r asset_id; do
