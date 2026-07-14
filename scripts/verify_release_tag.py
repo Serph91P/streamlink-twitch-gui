@@ -7,7 +7,7 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from release_common import validate_target_sha
+from release_common import validate_target_sha, validate_version
 
 
 FetchJson = Callable[[str, bool], dict | None]
@@ -18,6 +18,17 @@ def _repository_path(repository: str) -> str:
     if len(parts) != 2 or not all(parts):
         raise ValueError(f"invalid GitHub repository: {repository!r}")
     return "/".join(quote(part, safe="") for part in parts)
+
+
+def _validate_release_id(release_id: str | None) -> str:
+    if (
+        not isinstance(release_id, str)
+        or not release_id.isascii()
+        or not release_id.isdecimal()
+        or release_id.startswith("0")
+    ):
+        raise ValueError("release ID must be a positive decimal integer")
+    return release_id
 
 
 def _git_object(payload: dict, source: str) -> tuple[str, str]:
@@ -62,8 +73,12 @@ def verify_tag(
     fetch_json: FetchJson,
     allow_missing: bool = False,
     require_draft_release: bool = False,
+    release_id: str | None = None,
 ) -> str | None:
     target_sha = validate_target_sha(target_sha)
+    if not tag.startswith("v"):
+        raise ValueError("release tag must use the v<version> format")
+    validate_version(tag[1:])
     tag_sha = resolve_tag_commit(repository, tag, fetch_json)
     if tag_sha is None:
         if not allow_missing and not require_draft_release:
@@ -75,11 +90,12 @@ def verify_tag(
 
     if require_draft_release:
         repository_path = _repository_path(repository)
-        release_path = (
-            f"/repos/{repository_path}/releases/tags/{quote(tag, safe='')}"
-        )
+        release_id = _validate_release_id(release_id)
+        release_path = f"/repos/{repository_path}/releases/{release_id}"
         release = fetch_json(release_path, False)
         try:
+            release_url = release["url"]
+            response_id = release["id"]
             is_draft = release["draft"]
             release_tag = release["tag_name"]
             target_commitish = release["target_commitish"]
@@ -87,6 +103,15 @@ def verify_tag(
             raise ValueError(
                 f"invalid GitHub draft release response from {release_path}"
             ) from error
+        expected_url = f"https://api.github.com{release_path}"
+        if release_url != expected_url:
+            raise ValueError(
+                f"draft release URL {release_url!r} does not match expected repository"
+            )
+        if type(response_id) is not int or response_id != int(release_id):
+            raise ValueError(
+                f"draft release ID {response_id!r} does not match expected ID {release_id}"
+            )
         if is_draft is not True:
             raise ValueError(f"release {tag} is not a draft")
         if release_tag != tag:
@@ -135,6 +160,7 @@ def main() -> None:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--allow-missing", action="store_true")
     mode.add_argument("--require-draft-release", action="store_true")
+    parser.add_argument("--release-id")
     args = parser.parse_args()
 
     token = os.environ.get("GH_TOKEN")
@@ -147,6 +173,7 @@ def main() -> None:
         github_fetch_json(token),
         args.allow_missing,
         args.require_draft_release,
+        args.release_id,
     )
     if args.require_draft_release:
         print(f"verified draft release {args.tag} for target {args.target_sha}")

@@ -367,6 +367,7 @@ class ReleaseTagTests(unittest.TestCase):
     repository = "owner/project"
     tag = "v1.2.3"
     target_sha = "a" * 40
+    release_id = "353669835"
 
     def test_existing_tags_are_peeled_and_must_match_the_target(self):
         import verify_release_tag
@@ -417,22 +418,30 @@ class ReleaseTagTests(unittest.TestCase):
                 self.repository, self.tag, self.target_sha, fetch_json
             )
 
-    def test_missing_tag_is_bound_to_exact_draft_release_metadata(self):
+    def test_missing_tag_is_bound_to_exact_draft_release_id(self):
         import verify_release_tag
 
-        release_path = f"/repos/{self.repository}/releases/tags/{self.tag}"
+        ref_path = f"/repos/{self.repository}/git/ref/tags/{self.tag}"
+        release_by_tag_path = f"/repos/{self.repository}/releases/tags/{self.tag}"
+        release_path = f"/repos/{self.repository}/releases/{self.release_id}"
         release = {
+            "url": f"https://api.github.com{release_path}",
+            "id": int(self.release_id),
             "draft": True,
             "tag_name": self.tag,
             "target_commitish": self.target_sha,
         }
+        requests = []
 
         def fetch_json(path, allow_not_found=False):
-            if allow_not_found:
+            requests.append((path, allow_not_found))
+            if path in {ref_path, release_by_tag_path} and allow_not_found:
                 return None
             self.assertEqual(path, release_path)
             return release
 
+        self.assertIsNone(fetch_json(release_by_tag_path, True))
+        requests.clear()
         self.assertIsNone(
             verify_release_tag.verify_tag(
                 self.repository,
@@ -440,11 +449,18 @@ class ReleaseTagTests(unittest.TestCase):
                 self.target_sha,
                 fetch_json,
                 require_draft_release=True,
+                release_id=self.release_id,
             )
         )
+        self.assertEqual(requests, [(ref_path, True), (release_path, False)])
 
         invalid_releases = (
             {},
+            {
+                **release,
+                "url": "https://api.github.com/repos/other/project/releases/353669835",
+            },
+            {**release, "id": 123},
             {**release, "draft": False},
             {**release, "tag_name": "v9.9.9"},
             {**release, "target_commitish": "b" * 40},
@@ -459,6 +475,61 @@ class ReleaseTagTests(unittest.TestCase):
                     self.target_sha,
                     fetch_json,
                     require_draft_release=True,
+                    release_id=self.release_id,
+                )
+
+    def test_draft_release_rejects_unsafe_ids_before_release_request(self):
+        import verify_release_tag
+
+        ref_path = f"/repos/{self.repository}/git/ref/tags/{self.tag}"
+        invalid_ids = (
+            None,
+            "",
+            "0",
+            "-1",
+            "+1",
+            "01",
+            "1.0",
+            " 1",
+            "1 ",
+            "1/2",
+            "\N{FULLWIDTH DIGIT ONE}",
+            1,
+            True,
+        )
+
+        for release_id in invalid_ids:
+            requests = []
+
+            def fetch_json(path, allow_not_found=False):
+                requests.append((path, allow_not_found))
+                if path == ref_path and allow_not_found:
+                    return None
+                raise AssertionError("unexpected release request")
+
+            with self.subTest(release_id=release_id), self.assertRaisesRegex(
+                ValueError, "positive decimal"
+            ):
+                verify_release_tag.verify_tag(
+                    self.repository,
+                    self.tag,
+                    self.target_sha,
+                    fetch_json,
+                    require_draft_release=True,
+                    release_id=release_id,
+                )
+            self.assertEqual(requests, [(ref_path, True)])
+
+    def test_release_tag_must_match_version_policy(self):
+        import verify_release_tag
+
+        def fetch_json(_path, _allow_not_found=False):
+            raise AssertionError("invalid tags must fail before API requests")
+
+        for tag in ("1.2.3", "v1.2", "v01.2.3", "v1.2.3-rc.1"):
+            with self.subTest(tag=tag), self.assertRaises(ValueError):
+                verify_release_tag.verify_tag(
+                    self.repository, tag, self.target_sha, fetch_json
                 )
 
 
@@ -489,7 +560,7 @@ class NativeReleaseContractTests(unittest.TestCase):
 
         self.assertIn('[[ "$target" == "$GITHUB_SHA" ]]', workflow)
         self.assertIn('--target-sha "${{ needs.version.outputs.target }}"', workflow)
-        self.assertIn("targetCommitish", workflow)
+        self.assertIn("target_commitish", workflow)
         self.assertIn('== "$TARGET_SHA"', workflow)
         self.assertLess(
             workflow.index("Verify complete release contract"),
@@ -504,9 +575,11 @@ class NativeReleaseContractTests(unittest.TestCase):
             '--tag "$RELEASE_TAG" --target-sha "$TARGET_SHA"'
         )
         allow_missing = f"{verification} --allow-missing"
-        require_draft = f"{verification} --require-draft-release"
-        edit = 'gh release edit "$RELEASE_TAG"'
-        create = 'gh release create "$RELEASE_TAG"'
+        require_draft = (
+            f'{verification} --require-draft-release --release-id "$release_id"'
+        )
+        edit = 'gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id"'
+        create = 'gh api --method POST "repos/$GITHUB_REPOSITORY/releases"'
         draft_verification_lines = [
             line.strip()
             for line in workflow.splitlines()
@@ -519,14 +592,28 @@ class NativeReleaseContractTests(unittest.TestCase):
         self.assertLess(workflow.index(allow_missing), workflow.index(create))
         self.assertLess(workflow.index(create), workflow.rindex(require_draft))
 
+    def test_draft_id_is_resolved_from_the_release_list_and_must_be_unique(self):
+        workflow = self.read(".github/workflows/next-release.yml")
+
+        release_list = 'repos/$GITHUB_REPOSITORY/releases?per_page=100'
+        self.assertIn(release_list, workflow)
+        self.assertIn(".tag_name == env.RELEASE_TAG", workflow)
+        self.assertIn("${#release_ids[@]} -gt 1", workflow)
+        self.assertNotIn("releases/tags/$RELEASE_TAG", workflow)
+
     def test_reused_draft_assets_are_deleted_before_upload(self):
         workflow = self.read(".github/workflows/next-release.yml")
 
         asset_query = 'releases/$release_id/assets?per_page=100"'
         asset_delete = 'gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"'
-        upload = 'gh release upload "$RELEASE_TAG" release-assets/* --clobber'
+        upload = (
+            'gh api --method POST "https://uploads.github.com/repos/'
+            '$GITHUB_REPOSITORY/releases/$release_id/assets?name=$asset_name"'
+        )
         self.assertIn(asset_query, workflow)
         self.assertIn(asset_delete, workflow)
+        self.assertIn(upload, workflow)
+        self.assertNotIn('gh release upload "$RELEASE_TAG"', workflow)
         self.assertLess(workflow.index(asset_query), workflow.index(upload))
         self.assertLess(workflow.index(asset_delete), workflow.index(upload))
 
@@ -616,7 +703,9 @@ class NativeReleaseContractTests(unittest.TestCase):
                 )
         self.assertLess(
             workflow.index("Verify complete release contract"),
-            workflow.index("gh release create"),
+            workflow.index(
+                'gh api --method POST "repos/$GITHUB_REPOSITORY/releases"'
+            ),
         )
 
     def test_draft_release_prominently_discloses_unsigned_community_policy(self):
