@@ -2,9 +2,9 @@
 
 The current release channel produces an unsigned community build for manual
 evaluation. A push to `main` validates the exact source commit, builds packages,
-and creates or updates a GitHub Draft Release. The workflow never publishes a
-release. A maintainer must review and install-test the draft before manually
-publishing it through GitHub.
+and verifies and updates the preserved trusted GitHub Draft Release. The
+workflow never publishes a release. A maintainer must review and install-test
+the draft before manually publishing it through GitHub.
 
 This channel does not provide platform publisher trust. Windows installers are
 not Authenticode signed. macOS DMGs are not Developer ID signed or notarized.
@@ -27,7 +27,7 @@ draft target remains bound to that commit.
 Before building packages, CI runs frontend formatting, ESLint, TypeScript,
 Vitest, Vite, rustfmt, Clippy, and Rust tests. Actions use immutable commit SHA
 pins. The `release` environment protects both package builds and draft
-creation. Configure required reviewers and do not approve a deployment from an
+updates. Configure required reviewers and do not approve a deployment from an
 unreviewed source commit.
 
 An existing published release is never modified. The workflow updates only the
