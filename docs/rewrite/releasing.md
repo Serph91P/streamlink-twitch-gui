@@ -30,22 +30,32 @@ pins. The `release` environment protects both package builds and draft
 creation. Configure required reviewers and do not approve a deployment from an
 unreviewed source commit.
 
-An existing published release is never modified. An existing draft is updated
-only when its target commit is unchanged, and existing assets are removed
-before the exact replacement set is uploaded. Publication remains a separate
-manual action.
+An existing published release is never modified. The workflow updates only the
+preserved Draft Release with the configured database ID and matching tag. A
+missing draft, duplicate tag match, or replacement release fails before any
+release mutation. Existing assets are removed before the exact replacement set
+is uploaded. Publication remains a separate manual action.
 
 ## Release environment
 
-Create a GitHub environment named `release` and add one environment variable:
+Create a GitHub environment named `release` and add these environment variables:
 
 - `TWITCH_CLIENT_ID`: the public Twitch desktop application client ID.
+- `EXPECTED_RELEASE_ID`: the trusted database ID `353669835` of the preserved
+  GitHub Draft Release.
 
 The workflow reads it only as `${{ vars.TWITCH_CLIENT_ID }}`, rejects an empty
 or whitespace-only value before compiling each platform, and embeds it in every
 build. It is public application configuration, not a secret. Do not configure
 or use `TWITCH_CLIENT_SECRET`; a desktop application cannot keep a client
 secret confidential.
+
+`EXPECTED_RELEASE_ID` is non-secret release configuration. The workflow
+requires a positive ASCII decimal ID, requires the exact preserved ID
+`353669835`, and independently requires the unique tag-matching API result to
+have that ID before changing the draft or its assets. Do not substitute a newly
+created release. If the preserved draft is missing, restore the reviewed
+release state outside this workflow before retrying.
 
 This release workflow requires no signing, certificate, Apple account,
 notarization, or updater-key secrets.
