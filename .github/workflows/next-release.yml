@@ -201,7 +201,7 @@ jobs:
           retention-days: 7
 
   draft:
-    name: Verify and create draft release
+    name: Verify and update trusted draft release
     needs:
       - version
       - build
@@ -235,8 +235,9 @@ jobs:
           --tag "${{ needs.version.outputs.tag }}"
           --repository "$GITHUB_REPOSITORY"
           --target-sha "${{ needs.version.outputs.target }}"
-      - name: Create or update draft release
+      - name: Update trusted draft release
         env:
+          EXPECTED_RELEASE_ID: ${{ vars.EXPECTED_RELEASE_ID }}
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.version.outputs.tag }}
           RELEASE_VERSION: ${{ needs.version.outputs.version }}
@@ -244,6 +245,15 @@ jobs:
           PREVIOUS_TARGET_SHA: ${{ needs.version.outputs.previous_target }}
         shell: bash
         run: |
+          if ! [[ "$EXPECTED_RELEASE_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "EXPECTED_RELEASE_ID must be a positive ASCII decimal database ID" >&2
+            exit 1
+          fi
+          if [[ "$EXPECTED_RELEASE_ID" != 353669835 ]]; then
+            echo "EXPECTED_RELEASE_ID must identify preserved Draft Release 353669835" >&2
+            exit 1
+          fi
+
           release_title="UNSIGNED COMMUNITY BUILD - Streamlink Twitch GUI $RELEASE_VERSION"
           release_notes=$(cat <<'EOF'
           # UNSIGNED COMMUNITY BUILD
@@ -264,22 +274,24 @@ jobs:
             echo "Refusing to choose between duplicate releases for $RELEASE_TAG" >&2
             exit 1
           fi
-
-          if [[ ${#release_ids[@]} -eq 1 ]]; then
-            release_id=${release_ids[0]}
-            python3 scripts/verify_release_tag.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target-sha "$TARGET_SHA" --require-draft-release --release-id "$release_id" --previous-target-sha "$PREVIOUS_TARGET_SHA"
-            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -f tag_name="$RELEASE_TAG" -f target_commitish="$TARGET_SHA" -f name="$release_title" -f body="$release_notes" -F draft=true >/dev/null
-            asset_ids=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" --jq '.[].id')
-            while IFS= read -r asset_id; do
-              if [[ -n "$asset_id" ]]; then
-                gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
-              fi
-            done <<< "$asset_ids"
-          else
-            python3 scripts/verify_release_tag.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target-sha "$TARGET_SHA" --allow-missing
-            release_id=$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$RELEASE_TAG" -f target_commitish="$TARGET_SHA" -f name="$release_title" -f body="$release_notes" -F draft=true --jq .id)
-            python3 scripts/verify_release_tag.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target-sha "$TARGET_SHA" --require-draft-release --release-id "$release_id"
+          if [[ ${#release_ids[@]} -ne 1 ]]; then
+            echo "Expected preserved Draft Release $EXPECTED_RELEASE_ID for $RELEASE_TAG" >&2
+            exit 1
           fi
+
+          release_id=${release_ids[0]}
+          if [[ "$release_id" != "$EXPECTED_RELEASE_ID" ]]; then
+            echo "Tag-matching release ID $release_id does not match expected ID $EXPECTED_RELEASE_ID" >&2
+            exit 1
+          fi
+          python3 scripts/verify_release_tag.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target-sha "$TARGET_SHA" --require-draft-release --release-id "$release_id" --previous-target-sha "$PREVIOUS_TARGET_SHA"
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -f tag_name="$RELEASE_TAG" -f target_commitish="$TARGET_SHA" -f name="$release_title" -f body="$release_notes" -F draft=true >/dev/null
+          asset_ids=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" --jq '.[].id')
+          while IFS= read -r asset_id; do
+            if [[ -n "$asset_id" ]]; then
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
+            fi
+          done <<< "$asset_ids"
           for asset_path in release-assets/*; do
             asset_name=${asset_path##*/}
             gh api --method POST "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$asset_name" -H "Content-Type: application/octet-stream" --input "$asset_path" >/dev/null

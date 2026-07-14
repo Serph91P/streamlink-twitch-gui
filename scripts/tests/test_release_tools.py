@@ -1,9 +1,11 @@
 import hashlib
 import json
+import os
 import struct
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -670,6 +672,112 @@ class NativeReleaseContractTests(unittest.TestCase):
         ]
         self.assertEqual(matching_lines, [f"run: {command}"])
 
+    def run_draft_release_step(self, release_ids: str, expected_id: str | None):
+        workflow = self.read(".github/workflows/next-release.yml")
+        step = workflow.split("      - name: Update trusted draft release\n", 1)[1]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bin_directory = root / "bin"
+            bin_directory.mkdir()
+            mutation_log = root / "mutations"
+            (root / "release-assets").mkdir()
+            (root / "release-assets/test.asset").write_bytes(b"asset")
+
+            gh = bin_directory / "gh"
+            gh.write_text(
+                """#!/bin/sh
+case "$*" in
+  *"releases?per_page=100"*)
+    printf "%s" "$RELEASE_IDS"
+    ;;
+  *"--method PATCH"*|*"--method DELETE"*|*"--method POST"*)
+    printf "%s\\n" "$*" >> "$MUTATION_LOG"
+    ;;
+  *"--jq .draft"*)
+    printf "%s\\n" true
+    ;;
+  *"--jq .target_commitish"*)
+    printf "%s\\n" "$TARGET_SHA"
+    ;;
+esac
+""",
+                encoding="utf-8",
+            )
+            gh.chmod(0o755)
+            python = bin_directory / "python3"
+            python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            python.chmod(0o755)
+
+            environment = {
+                **os.environ,
+                "PATH": f"{bin_directory}:{os.environ['PATH']}",
+                "GH_TOKEN": "test-token",
+                "GITHUB_REPOSITORY": "owner/project",
+                "MUTATION_LOG": str(mutation_log),
+                "PREVIOUS_TARGET_SHA": "b" * 40,
+                "RELEASE_IDS": release_ids,
+                "RELEASE_TAG": "v1.2.3",
+                "RELEASE_VERSION": "1.2.3",
+                "TARGET_SHA": "a" * 40,
+            }
+            environment.pop("EXPECTED_RELEASE_ID", None)
+            if expected_id is not None:
+                environment["EXPECTED_RELEASE_ID"] = expected_id
+            result = subprocess.run(
+                ["bash", "-e", "-o", "pipefail", "-c", script],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+            )
+            mutations = (
+                mutation_log.read_text(encoding="utf-8").splitlines()
+                if mutation_log.exists()
+                else []
+            )
+        return result, mutations
+
+    def test_replacement_release_id_is_rejected_before_mutation(self):
+        result, mutations = self.run_draft_release_step("999\n", "353669835")
+
+        self.assertNotEqual(
+            result.returncode,
+            0,
+            "replacement release ID 999 was accepted despite expected ID 353669835",
+        )
+        self.assertEqual(mutations, [])
+
+    def test_expected_release_id_fails_closed_before_mutation(self):
+        for expected_id in (None, "", "invalid", "0", "999"):
+            with self.subTest(expected_id=expected_id):
+                result, mutations = self.run_draft_release_step(
+                    "353669835\n", expected_id
+                )
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(mutations, [])
+
+    def test_duplicate_or_missing_draft_release_fails_before_mutation(self):
+        for release_ids in ("353669835\n999\n", ""):
+            with self.subTest(release_ids=release_ids):
+                result, mutations = self.run_draft_release_step(
+                    release_ids, "353669835"
+                )
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(mutations, [])
+
+    def test_exact_expected_draft_release_is_updated(self):
+        result, mutations = self.run_draft_release_step(
+            "353669835\n", "353669835"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(any("--method PATCH" in mutation for mutation in mutations))
+        self.assertTrue(any("--method POST" in mutation for mutation in mutations))
+
     def test_release_authority_is_main_push_only(self):
         workflow = self.read(".github/workflows/next-release.yml")
 
@@ -714,7 +822,7 @@ class NativeReleaseContractTests(unittest.TestCase):
         self.assertIn('== "$TARGET_SHA"', workflow)
         self.assertLess(
             workflow.index("Verify complete release contract"),
-            workflow.index("Create or update draft release"),
+            workflow.index("Update trusted draft release"),
         )
 
     def test_repository_tag_is_verified_before_draft_mutation(self):
@@ -724,7 +832,6 @@ class NativeReleaseContractTests(unittest.TestCase):
             'python3 scripts/verify_release_tag.py --repository "$GITHUB_REPOSITORY" '
             '--tag "$RELEASE_TAG" --target-sha "$TARGET_SHA"'
         )
-        allow_missing = f"{verification} --allow-missing"
         require_draft = (
             f'{verification} --require-draft-release --release-id "$release_id"'
         )
@@ -732,14 +839,6 @@ class NativeReleaseContractTests(unittest.TestCase):
             f'{require_draft} --previous-target-sha "$PREVIOUS_TARGET_SHA"'
         )
         edit = 'gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id"'
-        create = 'gh api --method POST "repos/$GITHUB_REPOSITORY/releases"'
-        exact_draft_verification_lines = [
-            line.strip()
-            for line in workflow.splitlines()
-            if line.strip() == require_draft
-        ]
-
-        self.assertEqual(exact_draft_verification_lines, [require_draft])
         self.assertEqual(
             [
                 line.strip()
@@ -748,23 +847,44 @@ class NativeReleaseContractTests(unittest.TestCase):
             ],
             [allow_previous_target],
         )
-        self.assertIn(allow_missing, workflow)
         self.assertLess(workflow.index(allow_previous_target), workflow.index(edit))
-        self.assertLess(workflow.index(allow_missing), workflow.index(create))
-        self.assertLess(workflow.index(create), workflow.rindex(require_draft))
+        self.assertNotIn("--allow-missing", workflow)
+        self.assertNotIn(
+            'gh api --method POST "repos/$GITHUB_REPOSITORY/releases"', workflow
+        )
 
-    def test_draft_id_is_resolved_from_the_release_list_and_must_be_unique(self):
+    def test_draft_id_is_resolved_from_the_release_list_and_must_be_trusted(self):
         workflow = self.read(".github/workflows/next-release.yml")
 
         release_list = 'repos/$GITHUB_REPOSITORY/releases?per_page=100'
         duplicate_rejection = "if [[ ${#release_ids[@]} -gt 1 ]]; then"
+        expected_id_validation = (
+            'if ! [[ "$EXPECTED_RELEASE_ID" =~ ^[1-9][0-9]*$ ]]; then'
+        )
+        preserved_id_validation = (
+            'if [[ "$EXPECTED_RELEASE_ID" != 353669835 ]]; then'
+        )
+        selected_id_validation = (
+            'if [[ "$release_id" != "$EXPECTED_RELEASE_ID" ]]; then'
+        )
         transition_verification = '--previous-target-sha "$PREVIOUS_TARGET_SHA"'
+        patch = 'gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id"'
+        self.assertIn(
+            "EXPECTED_RELEASE_ID: ${{ vars.EXPECTED_RELEASE_ID }}", workflow
+        )
         self.assertIn(release_list, workflow)
         self.assertIn(".tag_name == env.RELEASE_TAG", workflow)
         self.assertIn(duplicate_rejection, workflow)
+        self.assertIn(expected_id_validation, workflow)
+        self.assertIn(preserved_id_validation, workflow)
+        self.assertIn(selected_id_validation, workflow)
         self.assertLess(
             workflow.index(duplicate_rejection), workflow.index(transition_verification)
         )
+        self.assertLess(
+            workflow.index(expected_id_validation), workflow.index(release_list)
+        )
+        self.assertLess(workflow.index(selected_id_validation), workflow.index(patch))
         self.assertNotIn("releases/tags/$RELEASE_TAG", workflow)
 
     def test_reused_draft_assets_are_deleted_before_upload(self):
@@ -870,7 +990,7 @@ class NativeReleaseContractTests(unittest.TestCase):
         self.assertLess(
             workflow.index("Verify complete release contract"),
             workflow.index(
-                'gh api --method POST "repos/$GITHUB_REPOSITORY/releases"'
+                'gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id"'
             ),
         )
 
@@ -926,6 +1046,8 @@ class NativeReleaseContractTests(unittest.TestCase):
             "automatic updates are not available",
             "Checksums and SBOM hashes do not make unsigned packages secure",
             "TWITCH_CLIENT_ID",
+            "EXPECTED_RELEASE_ID",
+            "353669835",
             "Future signed production releases",
         ):
             self.assertIn(claim, normalized)
