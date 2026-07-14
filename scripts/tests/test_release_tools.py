@@ -485,20 +485,29 @@ class NativeReleaseContractTests(unittest.TestCase):
         self.assertLess(workflow.index(asset_query), workflow.index(upload))
         self.assertLess(workflow.index(asset_delete), workflow.index(upload))
 
-    def test_updater_is_initialized_and_authorized_at_runtime(self):
+    def test_unsigned_runtime_has_no_updater_or_signature_surface(self):
         cargo = self.read("next/src-tauri/Cargo.toml")
         runtime = self.read("next/src-tauri/src/lib.rs")
         capability = json.loads(self.read("next/src-tauri/capabilities/main.json"))
 
-        self.assertRegex(
-            cargo,
-            r'tauri-plugin-updater = \{ version = "2\.\d+\.\d+", optional = true \}',
+        for updater_surface in (
+            "tauri-plugin-updater",
+            "minisign-verify",
+            "verify-updater-signature",
+            "verify_updater_signature.rs",
+            "dep:tauri-plugin-updater",
+        ):
+            with self.subTest(updater_surface=updater_surface):
+                self.assertNotIn(updater_surface, cargo)
+        self.assertNotIn("updater_signature", runtime)
+        self.assertNotIn("tauri_plugin_updater", runtime)
+        self.assertNotIn("updater:default", capability["permissions"])
+        self.assertFalse(
+            (self.root / "next/src-tauri/src/updater_signature.rs").exists()
         )
-        self.assertIn("dep:tauri-plugin-updater", cargo)
-        self.assertIn(
-            ".plugin(tauri_plugin_updater::Builder::new().build())", runtime
+        self.assertFalse(
+            (self.root / "next/src-tauri/src/bin/verify_updater_signature.rs").exists()
         )
-        self.assertIn("updater:default", capability["permissions"])
 
     def test_production_npm_audit_fails_on_low_severity(self):
         workflow = self.read(".github/workflows/security.yml")
@@ -507,6 +516,21 @@ class NativeReleaseContractTests(unittest.TestCase):
             workflow, "npm audit --omit=dev --audit-level=low"
         )
         self.assertNotIn("npm audit --omit=dev --audit-level=high", workflow)
+
+    def test_promotion_to_main_runs_current_app_and_security_ci(self):
+        pull_request_branches = (
+            "  pull_request:\n"
+            "    branches:\n"
+            "      - develop\n"
+            "      - main\n"
+        )
+
+        for workflow_path in (
+            ".github/workflows/next-ci.yml",
+            ".github/workflows/security.yml",
+        ):
+            with self.subTest(workflow_path=workflow_path):
+                self.assertIn(pull_request_branches, self.read(workflow_path))
 
     def test_production_npm_audit_rejects_trailing_shell_constructs(self):
         workflow = self.read(".github/workflows/security.yml").replace(
