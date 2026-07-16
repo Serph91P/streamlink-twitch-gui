@@ -1,10 +1,12 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import type {
   LegacyMigrationBackend,
   LegacyMigrationPreview,
   LegacyStorageSnapshot,
+  PlayerStatus,
   SettingsBackend,
+  StreamlinkStatus,
 } from "../../api/backend";
 import type { Settings } from "../../domain/settings";
 
@@ -30,11 +32,104 @@ export function SettingsPanel({
   onSaved: (settings: Settings) => void;
 }) {
   const [settings, setSettings] = useState(initialSettings);
+  const [savedPlayerPath, setSavedPlayerPath] = useState(
+    initialSettings.player.path,
+  );
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [migration, setMigration] = useState<LegacyMigrationPreview>();
   const [legacySnapshot, setLegacySnapshot] = useState<LegacyStorageSnapshot>();
   const [migrationBusy, setMigrationBusy] = useState(false);
+  const [streamlinkStatus, setStreamlinkStatus] = useState<
+    | { state: "pending" }
+    | { state: "detected"; value: StreamlinkStatus }
+    | { state: "error"; message: string }
+  >({ state: "pending" });
+  const [playerStatus, setPlayerStatus] = useState<
+    | { state: "pending" }
+    | { state: "probed"; value: PlayerStatus }
+    | { state: "error"; message: string }
+  >({ state: "pending" });
+
+  useEffect(() => {
+    let current = true;
+    void backend.getStreamlinkStatus().then(
+      (value) => {
+        if (current) setStreamlinkStatus({ state: "detected", value });
+      },
+      (reason: unknown) => {
+        if (current) {
+          setStreamlinkStatus({
+            state: "error",
+            message:
+              reason instanceof Error
+                ? reason.message
+                : "Could not probe Streamlink",
+          });
+        }
+      },
+    );
+    void backend.getPlayerStatus().then(
+      (value) => {
+        if (current) setPlayerStatus({ state: "probed", value });
+      },
+      (reason: unknown) => {
+        if (current) {
+          setPlayerStatus({
+            state: "error",
+            message:
+              reason instanceof Error
+                ? reason.message
+                : "Could not probe the configured player",
+          });
+        }
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [backend]);
+
+  async function refreshStreamlinkStatus() {
+    setStreamlinkStatus({ state: "pending" });
+    try {
+      setStreamlinkStatus({
+        state: "detected",
+        value: await backend.getStreamlinkStatus(),
+      });
+    } catch (reason) {
+      setStreamlinkStatus({
+        state: "error",
+        message:
+          reason instanceof Error
+            ? reason.message
+            : "Could not probe Streamlink",
+      });
+    }
+  }
+
+  async function refreshPlayerStatus() {
+    setPlayerStatus({ state: "pending" });
+    try {
+      setPlayerStatus({
+        state: "probed",
+        value: await backend.getPlayerStatus(),
+      });
+    } catch (reason) {
+      setPlayerStatus({
+        state: "error",
+        message:
+          reason instanceof Error
+            ? reason.message
+            : "Could not probe the configured player",
+      });
+    }
+  }
+
+  function refreshPrerequisites() {
+    void refreshStreamlinkStatus();
+    void refreshPlayerStatus();
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -43,8 +138,10 @@ export function SettingsPanel({
     try {
       const saved = await backend.saveSettings(settings);
       setSettings(saved);
+      setSavedPlayerPath(saved.player.path);
       onSaved(saved);
       setMessage("Settings saved");
+      refreshPrerequisites();
     } catch (reason) {
       setMessage("");
       setError(
@@ -122,8 +219,10 @@ export function SettingsPanel({
       const imported = await backend.confirmLegacyMigration(legacySnapshot);
       setMigration(imported);
       setSettings(imported.settings);
+      setSavedPlayerPath(imported.settings.player.path);
       onSaved(imported.settings);
       setMessage("Legacy settings imported");
+      refreshPrerequisites();
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -195,6 +294,93 @@ export function SettingsPanel({
         <p>Playback tools, preferred formats, and desktop behavior.</p>
       </header>
       <form className="settings-form" onSubmit={submit}>
+        <fieldset className="prerequisite-status">
+          <legend>Playback prerequisites</legend>
+          <p>
+            Streamlink 8.x and a compatible external player are separate
+            installs and are not bundled with this app.
+          </p>
+          <div>
+            {streamlinkStatus.state === "pending" ? (
+              <span role="status">Probing Streamlink...</span>
+            ) : null}
+            {streamlinkStatus.state === "detected" ? (
+              <>
+                <strong>
+                  Detected Streamlink {streamlinkStatus.value.version.major}.
+                  {streamlinkStatus.value.version.minor}.
+                  {streamlinkStatus.value.version.patch}
+                </strong>
+                <span>
+                  {streamlinkStatus.value.compatibility === "supported"
+                    ? "Compatible with this app."
+                    : streamlinkStatus.value.compatibility === "tooOld"
+                      ? "Streamlink 8.0.0 or newer is required."
+                      : "This newer major version has not been verified."}
+                </span>
+                <span>
+                  {streamlinkStatus.value.source === "userSelected"
+                    ? "Using the configured executable."
+                    : streamlinkStatus.value.source === "path"
+                      ? "Found on PATH."
+                      : "Found as a Python module."}
+                </span>
+              </>
+            ) : null}
+            {streamlinkStatus.state === "error" ? (
+              <>
+                <strong>Streamlink was not detected.</strong>
+                <span>{streamlinkStatus.message}</span>
+              </>
+            ) : null}
+          </div>
+          <div>
+            {playerStatus.state === "pending" ? (
+              <span role="status">Checking configured player...</span>
+            ) : null}
+            {playerStatus.state === "probed" &&
+            playerStatus.value.state === "unconfigured" ? (
+              <>
+                <strong>Player is not configured.</strong>
+                <span>
+                  Streamlink default player discovery runs only when playback
+                  starts; no player is currently claimed as detected.
+                </span>
+              </>
+            ) : null}
+            {playerStatus.state === "probed" &&
+            playerStatus.value.state === "configuredAvailable" ? (
+              <>
+                <strong>Configured player is available.</strong>
+                <span>{savedPlayerPath}</span>
+              </>
+            ) : null}
+            {playerStatus.state === "probed" &&
+            playerStatus.value.state === "configuredMissing" ? (
+              <>
+                <strong>Configured player is missing.</strong>
+                <span>{savedPlayerPath}</span>
+                <span>Choose an existing executable and save settings.</span>
+              </>
+            ) : null}
+            {playerStatus.state === "error" ? (
+              <>
+                <strong>Player availability could not be checked.</strong>
+                <span>{playerStatus.message}</span>
+              </>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            disabled={
+              streamlinkStatus.state === "pending" ||
+              playerStatus.state === "pending"
+            }
+            onClick={refreshPrerequisites}
+          >
+            Check prerequisites
+          </button>
+        </fieldset>
         <fieldset>
           <legend>Executables</legend>
           <label>

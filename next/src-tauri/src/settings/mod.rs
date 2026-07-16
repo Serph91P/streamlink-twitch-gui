@@ -6,6 +6,14 @@ use std::{
 
 pub use crate::domain::stream::Settings as AppSettings;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum PlayerStatus {
+    Unconfigured,
+    ConfiguredAvailable,
+    ConfiguredMissing,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SettingsError {
     #[error("settings I/O failed: {0}")]
@@ -44,12 +52,12 @@ impl SettingsStore {
             ));
         }
         let settings: AppSettings = serde_json::from_value(value)?;
-        validate(&settings)?;
+        validate(&settings, false)?;
         Ok(settings)
     }
 
     pub fn save(&self, settings: &AppSettings) -> Result<(), SettingsError> {
-        validate(settings)?;
+        validate(settings, true)?;
         let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
         fs::create_dir_all(parent)?;
         let temporary = self.path.with_extension("json.tmp");
@@ -68,6 +76,21 @@ impl SettingsStore {
             let _ = directory.sync_all();
         }
         Ok(())
+    }
+
+    pub fn player_status(&self) -> Result<PlayerStatus, SettingsError> {
+        if !self.path.exists() {
+            return Ok(PlayerStatus::Unconfigured);
+        }
+        let value: serde_json::Value =
+            serde_json::from_reader(BufReader::new(fs::File::open(&self.path)?))?;
+        let settings: AppSettings = serde_json::from_value(value)?;
+        validate(&settings, false)?;
+        Ok(match settings.player.path {
+            None => PlayerStatus::Unconfigured,
+            Some(path) if Path::new(&path).is_file() => PlayerStatus::ConfiguredAvailable,
+            Some(_) => PlayerStatus::ConfiguredMissing,
+        })
     }
 }
 
@@ -107,7 +130,7 @@ fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
     }
 }
 
-fn validate(settings: &AppSettings) -> Result<(), SettingsError> {
+fn validate(settings: &AppSettings, require_executable_files: bool) -> Result<(), SettingsError> {
     if settings.schema_version != 1 {
         return Err(SettingsError::Schema(settings.schema_version));
     }
@@ -120,7 +143,7 @@ fn validate(settings: &AppSettings) -> Result<(), SettingsError> {
             if path.trim().is_empty() {
                 return Err(SettingsError::Validation(format!("{name} cannot be empty")));
             }
-            if !Path::new(path).is_file() {
+            if require_executable_files && !Path::new(path).is_file() {
                 return Err(SettingsError::Validation(format!(
                     "{name} does not exist or is not a file"
                 )));
@@ -164,6 +187,12 @@ pub struct SettingsState(pub SettingsStore);
 #[tauri::command]
 pub fn get_settings(state: tauri::State<'_, SettingsState>) -> Result<AppSettings, String> {
     state.0.load().map_err(|error| error.to_string())
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn get_player_status(state: tauri::State<'_, SettingsState>) -> Result<PlayerStatus, String> {
+    state.0.player_status().map_err(|error| error.to_string())
 }
 
 #[cfg(feature = "desktop")]

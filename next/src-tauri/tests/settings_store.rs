@@ -4,7 +4,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use streamlink_twitch_gui_lib::settings::{AppSettings, SettingsStore};
+use streamlink_twitch_gui_lib::settings::{AppSettings, PlayerStatus, SettingsStore};
 
 fn temp_directory() -> PathBuf {
     let nonce = SystemTime::now()
@@ -33,6 +33,59 @@ fn round_trips_schema_versioned_settings_with_atomic_replacement() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&fs::read(path).unwrap()).unwrap()["schemaVersion"],
         1
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+#[allow(clippy::field_reassign_with_default)]
+fn reports_current_player_availability_without_exposing_its_path() {
+    let directory = temp_directory();
+    fs::create_dir_all(&directory).unwrap();
+    let player = directory.join("player.exe");
+    fs::write(&player, b"player").unwrap();
+    let store = SettingsStore::new(directory.join("settings.json"));
+
+    assert_eq!(store.player_status().unwrap(), PlayerStatus::Unconfigured);
+
+    let mut settings = AppSettings::default();
+    settings.player.path = Some(player.to_string_lossy().into_owned());
+    store.save(&settings).unwrap();
+    assert_eq!(
+        store.player_status().unwrap(),
+        PlayerStatus::ConfiguredAvailable
+    );
+
+    fs::remove_file(player).unwrap();
+    assert_eq!(
+        store.load().unwrap().player.path,
+        settings.player.path,
+        "a disappeared saved player must not make all settings unloadable"
+    );
+    assert_eq!(
+        store.player_status().unwrap(),
+        PlayerStatus::ConfiguredMissing
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+#[allow(clippy::field_reassign_with_default)]
+fn restores_a_saved_streamlink_path_after_the_executable_disappears() {
+    let directory = temp_directory();
+    fs::create_dir_all(&directory).unwrap();
+    let streamlink = directory.join("streamlink.exe");
+    fs::write(&streamlink, b"streamlink").unwrap();
+    let store = SettingsStore::new(directory.join("settings.json"));
+    let mut settings = AppSettings::default();
+    settings.streamlink_path = Some(streamlink.to_string_lossy().into_owned());
+    store.save(&settings).unwrap();
+
+    fs::remove_file(streamlink).unwrap();
+
+    assert_eq!(
+        store.load().unwrap().streamlink_path,
+        settings.streamlink_path
     );
     fs::remove_dir_all(directory).unwrap();
 }

@@ -7,7 +7,7 @@ use streamlink_twitch_gui_lib::twitch::auth::ValidationReason;
 use streamlink_twitch_gui_lib::twitch::lifecycle::{
     LifecycleError, SessionLifecycle, ValidationRunner,
 };
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 type ValidationResults = Arc<StdMutex<VecDeque<Result<Option<TwitchSession>, LifecycleError>>>>;
 
@@ -16,6 +16,29 @@ struct FakeLifecycle {
     results: ValidationResults,
     reasons: Arc<StdMutex<Vec<ValidationReason>>>,
     clears: Arc<StdMutex<usize>>,
+}
+
+#[derive(Clone)]
+struct BlockingLifecycle {
+    started: Arc<Notify>,
+    release: Arc<Notify>,
+    result: TwitchSession,
+}
+
+#[async_trait]
+impl SessionLifecycle for BlockingLifecycle {
+    async fn validate(
+        &self,
+        _reason: ValidationReason,
+    ) -> Result<Option<TwitchSession>, LifecycleError> {
+        self.started.notify_one();
+        self.release.notified().await;
+        Ok(Some(self.result.clone()))
+    }
+
+    async fn clear_credentials(&self) -> Result<(), LifecycleError> {
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -44,6 +67,38 @@ fn authenticated() -> TwitchSession {
         },
         expires_at: "2026-07-12T12:00:00Z".into(),
     }
+}
+
+#[tokio::test]
+async fn first_session_read_waits_for_startup_validation() {
+    let expected = authenticated();
+    let started = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let session = Arc::new(Mutex::new(TwitchSession::Anonymous));
+    let runner = ValidationRunner::new(
+        BlockingLifecycle {
+            started: started.clone(),
+            release: release.clone(),
+            result: expected.clone(),
+        },
+        session,
+    );
+
+    let validation = tokio::spawn({
+        let runner = runner.clone();
+        async move { runner.run_once(ValidationReason::Startup).await }
+    });
+    started.notified().await;
+    let first_read = tokio::spawn({
+        let runner = runner.clone();
+        async move { runner.session_after_startup().await }
+    });
+    tokio::task::yield_now().await;
+
+    assert!(!first_read.is_finished());
+    release.notify_one();
+    validation.await.unwrap().unwrap();
+    assert_eq!(first_read.await.unwrap(), expected);
 }
 
 #[tokio::test]

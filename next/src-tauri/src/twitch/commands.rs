@@ -83,7 +83,7 @@ fn safe_error(error: impl std::fmt::Display) -> String {
 
 #[tauri::command]
 pub async fn get_twitch_session(state: State<'_, TwitchState>) -> Result<TwitchSession, String> {
-    Ok(state.session.lock().await.clone())
+    Ok(state.validation.session_after_startup().await)
 }
 
 #[tauri::command]

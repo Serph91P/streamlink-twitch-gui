@@ -269,12 +269,34 @@ fn configure_process_tree(command: &mut Command) {
     command.process_group(0);
 }
 
+#[cfg(any(test, windows))]
+const fn windows_creation_flags(new_process_group: bool) -> u32 {
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    CREATE_NO_WINDOW
+        | if new_process_group {
+            CREATE_NEW_PROCESS_GROUP
+        } else {
+            0
+        }
+}
+
+#[cfg(windows)]
+pub(crate) fn configure_background_process(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+
+    command.creation_flags(windows_creation_flags(false));
+}
+
+#[cfg(not(windows))]
+pub(crate) fn configure_background_process(_command: &mut Command) {}
+
 #[cfg(windows)]
 fn configure_process_tree(command: &mut Command) {
     use std::os::windows::process::CommandExt;
 
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    command.creation_flags(windows_creation_flags(true));
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -301,14 +323,25 @@ fn terminate_process_tree(child: &mut Child) -> Result<(), ProcessError> {
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn windows_background_process_flags_preserve_process_tree_semantics() {
+        assert_eq!(super::windows_creation_flags(true), 0x0800_0200);
+        assert_eq!(super::windows_creation_flags(false), 0x0800_0000);
+    }
+}
+
 #[cfg(windows)]
 fn terminate_process_tree(child: &mut Child) -> Result<(), ProcessError> {
-    let status = Command::new("taskkill")
+    let mut command = Command::new("taskkill");
+    command
         .args(["/PID", &child.id().to_string(), "/T", "/F"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
+        .stderr(Stdio::null());
+    configure_background_process(&mut command);
+    let status = command.status()?;
     if !status.success() && child.try_wait()?.is_none() {
         child.kill()?;
     }

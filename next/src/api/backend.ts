@@ -42,7 +42,19 @@ export interface PlaybackBackend {
 export interface SettingsBackend {
   loadSettings(): Promise<Settings>;
   saveSettings(settings: Settings): Promise<Settings>;
+  getStreamlinkStatus(): Promise<StreamlinkStatus>;
+  getPlayerStatus(): Promise<PlayerStatus>;
 }
+
+export interface StreamlinkStatus {
+  source: "userSelected" | "path" | "pythonModule";
+  version: { major: number; minor: number; patch: number };
+  compatibility: "tooOld" | "supported" | "newerUnverified";
+}
+
+export type PlayerStatus = {
+  state: "unconfigured" | "configuredAvailable" | "configuredMissing";
+};
 
 export type MigrationOutcome =
   "imported" | "unsupported" | "skippedSensitive" | "invalid";
@@ -167,34 +179,50 @@ async function detachOnAbort<T>(
   }
 }
 
+function normalizeInvokeError(reason: unknown): Error {
+  const message =
+    typeof reason === "string"
+      ? reason.trim()
+      : reason instanceof Error
+        ? reason.message.trim()
+        : "";
+  return new Error(message || "Desktop command failed");
+}
+
+function invokeCommand<T>(command: string, args?: Record<string, unknown>) {
+  return invoke<T>(command, args).catch((reason: unknown) => {
+    throw normalizeInvokeError(reason);
+  });
+}
+
 export class TauriBackend implements AppBackend {
   async getSession(signal?: AbortSignal): Promise<TwitchSession> {
     return parseTwitchSession(
-      await detachOnAbort(invoke("get_twitch_session"), signal),
+      await detachOnAbort(invokeCommand("get_twitch_session"), signal),
     );
   }
 
   async beginTwitchLogin(signal?: AbortSignal): Promise<TwitchLoginChallenge> {
     return parseTwitchLoginChallenge(
-      await detachOnAbort(invoke("begin_twitch_login"), signal),
+      await detachOnAbort(invokeCommand("begin_twitch_login"), signal),
     );
   }
 
   async pollTwitchLogin(signal?: AbortSignal): Promise<TwitchSession> {
     return parseTwitchSession(
-      await detachOnAbort(invoke("poll_twitch_login"), signal),
+      await detachOnAbort(invokeCommand("poll_twitch_login"), signal),
     );
   }
 
   async signOut(signal?: AbortSignal): Promise<void> {
-    await detachOnAbort(invoke("sign_out_twitch"), signal);
+    await detachOnAbort(invokeCommand("sign_out_twitch"), signal);
   }
 
   users(
     logins: string[],
     signal?: AbortSignal,
   ): Promise<TwitchPage<TwitchUser>> {
-    return detachOnAbort(invoke("twitch_users", { logins }), signal);
+    return detachOnAbort(invokeCommand("twitch_users", { logins }), signal);
   }
 
   streams(
@@ -202,7 +230,10 @@ export class TauriBackend implements AppBackend {
     cursor?: string,
     signal?: AbortSignal,
   ): Promise<TwitchPage<TwitchStream>> {
-    return detachOnAbort(invoke("twitch_streams", { userId, cursor }), signal);
+    return detachOnAbort(
+      invokeCommand("twitch_streams", { userId, cursor }),
+      signal,
+    );
   }
 
   followedStreams(
@@ -211,7 +242,7 @@ export class TauriBackend implements AppBackend {
     signal?: AbortSignal,
   ): Promise<TwitchPage<TwitchStream>> {
     return detachOnAbort(
-      invoke("twitch_followed_streams", { userId, cursor }),
+      invokeCommand("twitch_followed_streams", { userId, cursor }),
       signal,
     );
   }
@@ -222,7 +253,7 @@ export class TauriBackend implements AppBackend {
     signal?: AbortSignal,
   ): Promise<TwitchPage<FollowedChannel>> {
     return detachOnAbort(
-      invoke("twitch_followed_channels", { userId, cursor }),
+      invokeCommand("twitch_followed_channels", { userId, cursor }),
       signal,
     );
   }
@@ -231,7 +262,7 @@ export class TauriBackend implements AppBackend {
     cursor?: string,
     signal?: AbortSignal,
   ): Promise<TwitchPage<TwitchGame>> {
-    return detachOnAbort(invoke("twitch_top_games", { cursor }), signal);
+    return detachOnAbort(invokeCommand("twitch_top_games", { cursor }), signal);
   }
 
   searchChannels(
@@ -240,7 +271,7 @@ export class TauriBackend implements AppBackend {
     signal?: AbortSignal,
   ): Promise<TwitchPage<TwitchSearchChannel>> {
     return detachOnAbort(
-      invoke("twitch_search_channels", { query, cursor }),
+      invokeCommand("twitch_search_channels", { query, cursor }),
       signal,
     );
   }
@@ -251,7 +282,7 @@ export class TauriBackend implements AppBackend {
     signal?: AbortSignal,
   ): Promise<TwitchPage<TwitchGame>> {
     return detachOnAbort(
-      invoke("twitch_search_categories", { query, cursor }),
+      invokeCommand("twitch_search_categories", { query, cursor }),
       signal,
     );
   }
@@ -261,30 +292,38 @@ export class TauriBackend implements AppBackend {
     signal?: AbortSignal,
   ): Promise<StreamCapabilities> {
     return parseStreamCapabilities(
-      await detachOnAbort(invoke("inspect_streams", { url }), signal),
+      await detachOnAbort(invokeCommand("inspect_streams", { url }), signal),
     );
   }
 
   launchStream(request: PlaybackLaunchRequest): Promise<PlaybackResult> {
-    return invoke("launch_stream", { request });
+    return invokeCommand("launch_stream", { request });
   }
 
   stopStream(): Promise<PlaybackResult> {
-    return invoke("stop_stream");
+    return invokeCommand("stop_stream");
   }
 
   loadSettings(): Promise<Settings> {
-    return invoke("get_settings");
+    return invokeCommand("get_settings");
   }
 
   saveSettings(settings: Settings): Promise<Settings> {
-    return invoke("save_settings", { settings });
+    return invokeCommand("save_settings", { settings });
+  }
+
+  getStreamlinkStatus(): Promise<StreamlinkStatus> {
+    return invokeCommand("get_streamlink_status");
+  }
+
+  getPlayerStatus(): Promise<PlayerStatus> {
+    return invokeCommand("get_player_status");
   }
 
   previewLegacyMigration(
     snapshot: LegacyStorageSnapshot,
   ): Promise<LegacyMigrationPreview> {
-    return invoke("preview_legacy_migration", {
+    return invokeCommand("preview_legacy_migration", {
       snapshot,
     });
   }
@@ -292,7 +331,7 @@ export class TauriBackend implements AppBackend {
   confirmLegacyMigration(
     snapshot: LegacyStorageSnapshot,
   ): Promise<LegacyMigrationPreview> {
-    return invoke("confirm_legacy_migration", {
+    return invokeCommand("confirm_legacy_migration", {
       snapshot,
       confirmed: true,
     });
@@ -432,6 +471,21 @@ export class BrowserBackend implements AppBackend {
 
   async saveSettings(settings: Settings): Promise<Settings> {
     return this.overrides.saveSettings?.(settings) ?? settings;
+  }
+
+  async getStreamlinkStatus(): Promise<StreamlinkStatus> {
+    if (this.overrides.getStreamlinkStatus) {
+      return this.overrides.getStreamlinkStatus();
+    }
+    throw new Error("Streamlink was not found");
+  }
+
+  async getPlayerStatus(): Promise<PlayerStatus> {
+    return (
+      this.overrides.getPlayerStatus?.() ?? {
+        state: "unconfigured",
+      }
+    );
   }
 
   async previewLegacyMigration(

@@ -22,6 +22,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_opener::init())
         .manage(twitch_state)
         .setup(|app| {
             let settings_path = app.path().app_config_dir()?.join("settings.json");
@@ -63,9 +64,11 @@ pub fn run() {
             twitch::commands::twitch_search_channels,
             twitch::commands::twitch_search_categories,
             streamlink::commands::inspect_streams,
+            streamlink::commands::get_streamlink_status,
             streamlink::commands::launch_stream,
             streamlink::commands::stop_stream,
             settings::get_settings,
+            settings::get_player_status,
             settings::save_settings,
             migration::preview_legacy_migration,
             migration::confirm_legacy_migration,

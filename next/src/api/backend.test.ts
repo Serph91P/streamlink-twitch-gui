@@ -62,3 +62,50 @@ describe("tauri legacy migration backend", () => {
     storageRead.mockRestore();
   });
 });
+
+describe("tauri prerequisite status backend", () => {
+  it("probes player availability without sending or receiving a path", async () => {
+    invoke.mockResolvedValue({ state: "configuredMissing" });
+
+    await expect(new TauriBackend().getPlayerStatus()).resolves.toEqual({
+      state: "configuredMissing",
+    });
+    expect(invoke).toHaveBeenCalledWith("get_player_status", undefined);
+  });
+});
+
+describe("tauri error boundary", () => {
+  it.each([
+    ["getSession", "Helix authentication failed"],
+    ["inspectStreams", "Streamlink was not found"],
+  ] as const)(
+    "normalizes string rejections from %s",
+    async (operation, message) => {
+      invoke.mockRejectedValueOnce(message);
+      const backend = new TauriBackend();
+
+      const result =
+        operation === "getSession"
+          ? backend.getSession()
+          : backend.inspectStreams("https://twitch.tv/example");
+
+      await expect(result).rejects.toEqual(expect.any(Error));
+      await expect(result).rejects.toThrow(message);
+    },
+  );
+
+  it("does not expose fields from unknown rejection objects", async () => {
+    invoke.mockRejectedValueOnce({
+      message: "request failed",
+      accessToken: "component-secret-token",
+    });
+
+    const error = await new TauriBackend()
+      .loadSettings()
+      .catch((reason) => reason);
+
+    expect(error).toEqual(expect.any(Error));
+    expect(error).toHaveProperty("message", "Desktop command failed");
+    expect(String(error)).not.toContain("component-secret-token");
+  });
+});

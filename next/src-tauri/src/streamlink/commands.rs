@@ -10,7 +10,7 @@ use crate::{
 
 use super::{
     arguments::{BuiltArguments, PlaybackRequest, PlayerConfiguration, build_playback_arguments},
-    discovery::{StreamlinkExecutable, detect_streamlink},
+    discovery::{StreamlinkExecutable, StreamlinkStatus, detect_streamlink},
     inspect,
     process::{PlaybackProcess, launch_playback},
 };
@@ -94,6 +94,25 @@ pub async fn inspect_streams(
         let executable = detect_streamlink(selected, Duration::from_secs(3))
             .map_err(|error| error.to_string())?;
         inspect::inspect_streams(&executable.executable, &url, Duration::from_secs(15))
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn get_streamlink_status(
+    settings: tauri::State<'_, SettingsState>,
+) -> Result<StreamlinkStatus, String> {
+    let selected = settings
+        .0
+        .load()
+        .map_err(|error| error.to_string())?
+        .streamlink_path
+        .map(PathBuf::from);
+    tauri::async_runtime::spawn_blocking(move || {
+        detect_streamlink(selected, Duration::from_secs(3))
+            .map(StreamlinkStatus::from)
             .map_err(|error| error.to_string())
     })
     .await

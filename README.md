@@ -22,11 +22,11 @@ The repository still contains the previous NW.js and Ember implementation as mig
 
 ## Requirements
 
-The application requires a separately installed [Streamlink CLI](https://streamlink.github.io/install.html). The current compatibility code accepts Streamlink 8.x, with 8.4 or newer recommended.
+The application requires a separately installed [Streamlink CLI](https://streamlink.github.io/install.html). Streamlink 8.0.0 or newer is required; 8.x is the verified major, while later major versions are detected but reported as unverified.
 
 Stream playback also requires a player supported by Streamlink. Streamlink and the player are not bundled.
 
-Twitch authentication uses Twitch's device authorization flow. A build must be compiled with a public Twitch application client ID in `TWITCH_CLIENT_ID`; no Twitch client secret belongs in the desktop application. The current frontend does not yet expose every implemented backend capability.
+Twitch authentication uses Twitch's device authorization flow. A build must be compiled with a public Twitch application client ID in `TWITCH_CLIENT_ID`; no Twitch client secret belongs in the desktop application. The frontend provides inline device login and sign-out on Twitch routes. Settings reports configured players as currently available or missing; when no player is configured, Streamlink's own player discovery occurs only when playback starts and is not reported as a detected player beforehand.
 
 ## Install
 
