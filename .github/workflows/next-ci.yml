@@ -131,9 +131,13 @@ jobs:
         working-directory: next
         shell: pwsh
         run: New-Item -ItemType Directory -Force dist | Out-Null
-      - name: Test Windows backend
+      - name: Test Windows-specific contracts
         working-directory: next
-        run: cargo test --manifest-path src-tauri/Cargo.toml --all-features
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml --all-features --lib
+          cargo test --manifest-path src-tauri/Cargo.toml --all-features --test settings_store
+          cargo test --manifest-path src-tauri/Cargo.toml --all-features --test startup_failure
+          cargo test --manifest-path src-tauri/Cargo.toml --all-features --test streamlink_process
       - name: Build release executable without Twitch configuration
         working-directory: next
         shell: pwsh
