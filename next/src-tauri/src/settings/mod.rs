@@ -6,6 +6,14 @@ use std::{
 
 pub use crate::domain::stream::Settings as AppSettings;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum PlayerStatus {
+    Unconfigured,
+    ConfiguredUsable,
+    ConfiguredUnavailable,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SettingsError {
     #[error("settings I/O failed: {0}")]
@@ -44,12 +52,12 @@ impl SettingsStore {
             ));
         }
         let settings: AppSettings = serde_json::from_value(value)?;
-        validate(&settings)?;
+        validate(&settings, false)?;
         Ok(settings)
     }
 
     pub fn save(&self, settings: &AppSettings) -> Result<(), SettingsError> {
-        validate(settings)?;
+        validate(settings, true)?;
         let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
         fs::create_dir_all(parent)?;
         let temporary = self.path.with_extension("json.tmp");
@@ -68,6 +76,21 @@ impl SettingsStore {
             let _ = directory.sync_all();
         }
         Ok(())
+    }
+
+    pub fn player_status(&self) -> Result<PlayerStatus, SettingsError> {
+        if !self.path.exists() {
+            return Ok(PlayerStatus::Unconfigured);
+        }
+        let value: serde_json::Value =
+            serde_json::from_reader(BufReader::new(fs::File::open(&self.path)?))?;
+        let settings: AppSettings = serde_json::from_value(value)?;
+        validate(&settings, false)?;
+        Ok(match settings.player.path {
+            None => PlayerStatus::Unconfigured,
+            Some(path) if executable_is_usable(Path::new(&path)) => PlayerStatus::ConfiguredUsable,
+            Some(_) => PlayerStatus::ConfiguredUnavailable,
+        })
     }
 }
 
@@ -107,7 +130,7 @@ fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
     }
 }
 
-fn validate(settings: &AppSettings) -> Result<(), SettingsError> {
+fn validate(settings: &AppSettings, require_executable_files: bool) -> Result<(), SettingsError> {
     if settings.schema_version != 1 {
         return Err(SettingsError::Schema(settings.schema_version));
     }
@@ -120,9 +143,9 @@ fn validate(settings: &AppSettings) -> Result<(), SettingsError> {
             if path.trim().is_empty() {
                 return Err(SettingsError::Validation(format!("{name} cannot be empty")));
             }
-            if !Path::new(path).is_file() {
+            if require_executable_files && !executable_is_usable(Path::new(path)) {
                 return Err(SettingsError::Validation(format!(
-                    "{name} does not exist or is not a file"
+                    "{name} does not exist or is not an executable file"
                 )));
             }
         }
@@ -148,6 +171,60 @@ fn validate(settings: &AppSettings) -> Result<(), SettingsError> {
     Ok(())
 }
 
+fn executable_is_usable(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(windows)]
+    {
+        windows_executable_is_usable(path)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        true
+    }
+}
+
+#[cfg(windows)]
+fn windows_executable_is_usable(path: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetBinaryTypeW;
+
+    if !has_windows_executable_extension(path) {
+        return false;
+    }
+    let path = path
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let mut binary_type = u32::MAX;
+    let recognized = unsafe { GetBinaryTypeW(path.as_ptr(), &mut binary_type) != 0 };
+    recognized && windows_binary_type_is_usable(binary_type)
+}
+
+#[cfg(any(test, windows))]
+fn has_windows_executable_extension(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| {
+        extension.eq_ignore_ascii_case("exe") || extension.eq_ignore_ascii_case("com")
+    })
+}
+
+#[cfg(any(test, windows))]
+const fn windows_binary_type_is_usable(binary_type: u32) -> bool {
+    matches!(binary_type, 0 | 6)
+}
+
 fn validate_text(name: &str, value: &str) -> Result<(), SettingsError> {
     if value.chars().any(char::is_control) {
         return Err(SettingsError::Validation(format!(
@@ -168,6 +245,12 @@ pub fn get_settings(state: tauri::State<'_, SettingsState>) -> Result<AppSetting
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
+pub fn get_player_status(state: tauri::State<'_, SettingsState>) -> Result<PlayerStatus, String> {
+    state.0.player_status().map_err(|error| error.to_string())
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
 pub fn save_settings(
     app: tauri::AppHandle,
     state: tauri::State<'_, SettingsState>,
@@ -177,4 +260,29 @@ pub fn save_settings(
     state.0.save(&settings).map_err(|error| error.to_string())?;
     crate::desktop::apply_runtime_settings(&app, &runtime, &settings)?;
     Ok(settings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{has_windows_executable_extension, windows_binary_type_is_usable};
+    use std::path::Path;
+
+    #[test]
+    fn windows_player_contract_accepts_only_native_executable_extensions() {
+        assert!(has_windows_executable_extension(Path::new(
+            "C:\\Tools\\mpv.EXE"
+        )));
+        assert!(has_windows_executable_extension(Path::new(
+            "C:\\Tools\\player.com"
+        )));
+        assert!(!has_windows_executable_extension(Path::new(
+            "C:\\Tools\\notes.txt"
+        )));
+        assert!(!has_windows_executable_extension(Path::new(
+            "C:\\Tools\\player"
+        )));
+        assert!(windows_binary_type_is_usable(0));
+        assert!(windows_binary_type_is_usable(6));
+        assert!(!windows_binary_type_is_usable(1));
+    }
 }

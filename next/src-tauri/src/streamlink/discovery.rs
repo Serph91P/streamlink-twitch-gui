@@ -33,6 +33,24 @@ pub struct StreamlinkDetection {
     pub compatibility: Compatibility,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamlinkStatus {
+    pub source: DiscoverySource,
+    pub version: StreamlinkVersion,
+    pub compatibility: Compatibility,
+}
+
+impl From<StreamlinkDetection> for StreamlinkStatus {
+    fn from(detection: StreamlinkDetection) -> Self {
+        Self {
+            source: detection.source,
+            version: detection.version,
+            compatibility: detection.compatibility,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DetectionError {
     Missing,
@@ -166,6 +184,7 @@ impl Probe for SystemProbe {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        super::process::configure_background_process(&mut command);
         let mut child = command.spawn().map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
                 ProbeFailure::NotFound
@@ -209,7 +228,8 @@ mod tests {
     use std::{collections::HashMap, ffi::OsString, path::PathBuf, time::Duration};
 
     use super::{
-        DetectionError, DiscoverySource, Probe, ProbeFailure, ProbeOutput, detect_with_probe,
+        DetectionError, DiscoverySource, Probe, ProbeFailure, ProbeOutput, StreamlinkDetection,
+        StreamlinkExecutable, StreamlinkStatus, detect_with_probe,
     };
     use crate::streamlink::version::{Compatibility, StreamlinkVersion};
 
@@ -315,5 +335,26 @@ mod tests {
             detect_with_probe(None, Duration::from_secs(1), &mut malformed).unwrap_err(),
             DetectionError::MalformedVersion
         );
+    }
+
+    #[test]
+    fn status_exposes_detection_without_the_executable_path() {
+        let detection = StreamlinkDetection {
+            executable: StreamlinkExecutable {
+                program: OsString::from("/private/configured/streamlink"),
+                prefix_arguments: Vec::new(),
+            },
+            source: DiscoverySource::UserSelected,
+            version: StreamlinkVersion::new(8, 4, 0),
+            compatibility: Compatibility::Supported,
+        };
+
+        let serialized = serde_json::to_value(StreamlinkStatus::from(detection)).unwrap();
+
+        assert_eq!(serialized["source"], "userSelected");
+        assert_eq!(serialized["version"]["major"], 8);
+        assert_eq!(serialized["compatibility"], "supported");
+        assert!(!serialized.to_string().contains("/private/configured"));
+        assert!(serialized.get("executable").is_none());
     }
 }

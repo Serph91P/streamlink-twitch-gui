@@ -79,6 +79,27 @@ describe("usePlayback", () => {
     );
   });
 
+  it("never reports running when launch did not remain active", async () => {
+    const backend: PlaybackBackend = {
+      inspectStreams: vi.fn(),
+      launchStream: vi.fn(async () => ({
+        status: "stopped" as const,
+        diagnostics: ["Streamlink exited before playback started"],
+      })),
+      stopStream: vi.fn(),
+    };
+    const { result } = renderHook(() =>
+      usePlayback(backend, "https://twitch.tv/signalnoise", variants),
+    );
+
+    await act(() => result.current.play());
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.diagnostics).toContain(
+      "Streamlink exited before playback started",
+    );
+  });
+
   it("launches with only the selected variant codec", async () => {
     const backend: PlaybackBackend = {
       inspectStreams: vi.fn(),

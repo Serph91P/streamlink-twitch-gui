@@ -46,6 +46,135 @@ describe("SettingsPanel", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Settings saved");
   });
 
+  it("probes and explains the separate playback prerequisites", async () => {
+    const getStreamlinkStatus = vi.fn(async () => ({
+      source: "path" as const,
+      version: { major: 8, minor: 4, patch: 0 },
+      compatibility: "supported" as const,
+    }));
+    const getPlayerStatus = vi.fn(async () => ({
+      state: "unconfigured" as const,
+    }));
+    const backend = new BrowserBackend({
+      getStreamlinkStatus,
+      getPlayerStatus,
+    });
+
+    render(
+      <SettingsPanel
+        backend={backend}
+        settings={defaultSettings}
+        onSaved={() => undefined}
+      />,
+    );
+
+    expect(
+      screen.getByText(/Streamlink 8.x and a compatible external player/),
+    ).toHaveTextContent("not bundled");
+    expect(await screen.findByText("Detected Streamlink 8.4.0")).toBeVisible();
+    expect(screen.getByText(/Player is not configured/)).toBeVisible();
+    expect(
+      screen.getByText(
+        /default player discovery runs only when playback starts/,
+      ),
+    ).toBeVisible();
+    expect(getStreamlinkStatus).toHaveBeenCalledOnce();
+    expect(getPlayerStatus).toHaveBeenCalledOnce();
+  });
+
+  it("reports a configured player only when its executable is usable", async () => {
+    const settings = {
+      ...defaultSettings,
+      player: { path: "/usr/bin/mpv", arguments: [] },
+    };
+    const backend = new BrowserBackend({
+      getPlayerStatus: async () => ({ state: "configuredUsable" }),
+    });
+
+    render(
+      <SettingsPanel
+        backend={backend}
+        settings={settings}
+        onSaved={() => undefined}
+      />,
+    );
+
+    expect(
+      await screen.findByText("Configured player is usable."),
+    ).toBeVisible();
+    expect(screen.getByText("/usr/bin/mpv")).toBeVisible();
+  });
+
+  it("gives remediation when a configured player is unavailable", async () => {
+    const settings = {
+      ...defaultSettings,
+      player: { path: "C:\\Tools\\mpv.exe", arguments: [] },
+    };
+    const backend = new BrowserBackend({
+      getPlayerStatus: async () => ({ state: "configuredUnavailable" }),
+    });
+
+    render(
+      <SettingsPanel
+        backend={backend}
+        settings={settings}
+        onSaved={() => undefined}
+      />,
+    );
+
+    expect(
+      await screen.findByText("Configured player cannot be used."),
+    ).toBeVisible();
+    expect(screen.getByText("C:\\Tools\\mpv.exe")).toBeVisible();
+    expect(
+      screen.getByText(/Choose an executable file you can run/),
+    ).toBeVisible();
+  });
+
+  it("reports a missing Streamlink probe without claiming detection", async () => {
+    const backend = new BrowserBackend({
+      getStreamlinkStatus: async () => {
+        throw new Error("Streamlink was not found");
+      },
+    });
+
+    render(
+      <SettingsPanel
+        backend={backend}
+        settings={defaultSettings}
+        onSaved={() => undefined}
+      />,
+    );
+
+    expect(
+      await screen.findByText("Streamlink was not detected."),
+    ).toBeVisible();
+    expect(screen.getByText("Streamlink was not found")).toBeVisible();
+    expect(screen.queryByText(/Detected Streamlink/)).not.toBeInTheDocument();
+  });
+
+  it("does not report an unsaved player path as configured", async () => {
+    const backend = new BrowserBackend();
+    render(
+      <SettingsPanel
+        backend={backend}
+        settings={defaultSettings}
+        onSaved={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByText("Player is not configured.")).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText("Player executable"), {
+      target: { value: "/not-yet-validated/player" },
+    });
+
+    expect(screen.getByText("Player is not configured.")).toBeVisible();
+    expect(
+      screen.queryByText("Configured player is usable."),
+    ).not.toBeInTheDocument();
+  });
+
   it("previews legacy settings and imports only after explicit confirmation", async () => {
     const currentSettings = {
       ...defaultSettings,

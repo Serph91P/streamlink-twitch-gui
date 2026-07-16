@@ -13,8 +13,10 @@ import type {
   TwitchStream,
 } from "../domain/twitch";
 import type { Settings } from "../domain/settings";
+import { TwitchAuthPanel } from "../features/auth/TwitchAuthPanel";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { PlaybackPanel } from "../features/playback/PlaybackPanel";
+import { twitchQueryKeys } from "../queries/twitch";
 
 function Header({
   eyebrow,
@@ -101,44 +103,25 @@ function LiveRoute({ backend }: { backend: AppBackend }) {
 
 function FollowingRoute({
   backend,
+  userId,
   channelsOnly = false,
 }: {
   backend: AppBackend;
+  userId: string;
   channelsOnly?: boolean;
 }) {
-  const session = useQuery({
-    queryKey: ["twitch", "session"],
-    queryFn: ({ signal }) => backend.getSession(signal),
-  });
-  const userId =
-    session.data?.status === "authenticated" ? session.data.user.id : "";
   const query = useQuery<TwitchPage<TwitchStream | FollowedChannel>>({
     queryKey: [
       "twitch",
       channelsOnly ? "followed-channels" : "followed-streams",
       userId,
     ],
-    enabled: Boolean(userId),
     queryFn: async ({ signal }) =>
       channelsOnly
         ? backend.followedChannels(userId, undefined, signal)
         : backend.followedStreams(userId, undefined, signal),
   });
   const title = channelsOnly ? "Followed channels" : "Following live";
-  if (!session.isPending && !userId)
-    return (
-      <>
-        <Header
-          eyebrow="Your lineup"
-          title={title}
-          description="Your personal Twitch desk."
-        />
-        <div className="state-panel">
-          <strong>Sign in to see your follows</strong>
-          <p>Authentication stays in the secure Rust core.</p>
-        </div>
-      </>
-    );
   return (
     <>
       <Header
@@ -147,8 +130,8 @@ function FollowingRoute({
         description="Your personal Twitch desk."
       />
       <QueryState
-        pending={session.isPending || query.isPending}
-        error={session.error || query.error}
+        pending={query.isPending}
+        error={query.error}
         empty={Boolean(query.data && query.data.items.length === 0)}
         onRetry={() => void query.refetch()}
       />
@@ -170,6 +153,106 @@ function FollowingRoute({
             ) : null,
           )}
         </section>
+      ) : null}
+    </>
+  );
+}
+
+const routeHeaders: Record<
+  Exclude<RouteName, "settings">,
+  Parameters<typeof Header>[0]
+> = {
+  live: {
+    eyebrow: "On air",
+    title: "Live now",
+    description: "Current broadcasts, ordered by the Twitch live signal.",
+  },
+  following: {
+    eyebrow: "Your lineup",
+    title: "Following live",
+    description: "Your personal Twitch desk.",
+  },
+  channels: {
+    eyebrow: "Your lineup",
+    title: "Followed channels",
+    description: "Your personal Twitch desk.",
+  },
+  categories: {
+    eyebrow: "Directory",
+    title: "Top categories",
+    description: "The busiest rooms across Twitch right now.",
+  },
+  search: {
+    eyebrow: "Find a signal",
+    title: "Search Twitch",
+    description:
+      "Look up channels and broadcasts without leaving the keyboard.",
+  },
+};
+
+function TwitchRoute({
+  route,
+  backend,
+  settings,
+}: {
+  route: Exclude<RouteName, "settings">;
+  backend: AppBackend;
+  settings: Settings;
+}) {
+  const session = useQuery({
+    queryKey: twitchQueryKeys.session,
+    queryFn: ({ signal }) => backend.getSession(signal),
+  });
+
+  if (session.isPending) {
+    return (
+      <>
+        <Header {...routeHeaders[route]} />
+        <p role="status" className="state-panel">
+          Checking Twitch session...
+        </p>
+      </>
+    );
+  }
+  if (session.error || !session.data) {
+    return (
+      <>
+        <Header {...routeHeaders[route]} />
+        <QueryState
+          pending={false}
+          error={session.error ?? new Error("Could not load Twitch session")}
+          empty={false}
+          onRetry={() => void session.refetch()}
+        />
+      </>
+    );
+  }
+  if (session.data.status === "anonymous") {
+    return (
+      <>
+        <Header {...routeHeaders[route]} />
+        <TwitchAuthPanel backend={backend} session={session.data} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <TwitchAuthPanel backend={backend} session={session.data} />
+      {route === "live" ? <LiveRoute backend={backend} /> : null}
+      {route === "following" ? (
+        <FollowingRoute backend={backend} userId={session.data.user.id} />
+      ) : null}
+      {route === "channels" ? (
+        <FollowingRoute
+          backend={backend}
+          userId={session.data.user.id}
+          channelsOnly
+        />
+      ) : null}
+      {route === "categories" ? <CategoriesRoute backend={backend} /> : null}
+      {route === "search" ? (
+        <SearchRoute backend={backend} settings={settings} />
       ) : null}
     </>
   );
@@ -353,18 +436,14 @@ export function BrowseRoute({
   onSettingsSaved: (settings: Settings) => void;
   onNavigate: (route: RouteName) => void;
 }) {
-  if (route === "live") return <LiveRoute backend={backend} />;
-  if (route === "following") return <FollowingRoute backend={backend} />;
-  if (route === "channels")
-    return <FollowingRoute backend={backend} channelsOnly />;
-  if (route === "categories") return <CategoriesRoute backend={backend} />;
-  if (route === "search")
-    return <SearchRoute backend={backend} settings={settings} />;
-  return (
-    <SettingsPanel
-      backend={backend}
-      settings={settings}
-      onSaved={onSettingsSaved}
-    />
-  );
+  if (route === "settings") {
+    return (
+      <SettingsPanel
+        backend={backend}
+        settings={settings}
+        onSaved={onSettingsSaved}
+      />
+    );
+  }
+  return <TwitchRoute route={route} backend={backend} settings={settings} />;
 }
