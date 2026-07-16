@@ -265,6 +265,7 @@ describe("browsing experience", () => {
       .mockResolvedValueOnce({ status: "anonymous" })
       .mockResolvedValueOnce(authenticatedSession);
     const signOut = vi.fn(async () => undefined);
+    const cancelTwitchLogin = vi.fn(async () => undefined);
     const streams = vi.fn(async () => ({ items: [liveStream] }));
     const backend = new BrowserBackend({
       getSession: async () => ({ status: "anonymous" }),
@@ -275,6 +276,7 @@ describe("browsing experience", () => {
         pollingIntervalSeconds: 1,
       }),
       pollTwitchLogin,
+      cancelTwitchLogin,
       signOut,
       streams,
     });
@@ -291,6 +293,7 @@ describe("browsing experience", () => {
       await screen.findByText("Signed in as Viewer", {}, { timeout: 3_000 }),
     ).toBeVisible();
     expect(pollTwitchLogin).toHaveBeenCalledTimes(2);
+    expect(cancelTwitchLogin).not.toHaveBeenCalled();
     expect(
       await screen.findByRole("link", { name: /Signal Noise/ }),
     ).toBeVisible();
@@ -306,6 +309,7 @@ describe("browsing experience", () => {
     const pollTwitchLogin = vi.fn(async () => ({
       status: "anonymous" as const,
     }));
+    const cancelTwitchLogin = vi.fn(async () => undefined);
     const backend = new BrowserBackend({
       getSession: async () => ({ status: "anonymous" }),
       beginTwitchLogin: async () => ({
@@ -315,6 +319,7 @@ describe("browsing experience", () => {
         pollingIntervalSeconds: 1,
       }),
       pollTwitchLogin,
+      cancelTwitchLogin,
     });
     const { unmount } = render(<App backend={backend} />);
 
@@ -329,6 +334,11 @@ describe("browsing experience", () => {
       ),
     ).toBeVisible();
     expect(pollTwitchLogin).not.toHaveBeenCalled();
+    await waitFor(() => expect(cancelTwitchLogin).toHaveBeenCalledOnce());
+    expect(cancelTwitchLogin).toHaveBeenLastCalledWith(
+      expect.any(String),
+      undefined,
+    );
 
     unmount();
     render(<App backend={backend} />);
@@ -336,7 +346,14 @@ describe("browsing experience", () => {
       await screen.findByRole("button", { name: "Sign in with Twitch" }),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
-    expect(screen.queryByText("SHORT-LIVED")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText("SHORT-LIVED")).not.toBeInTheDocument(),
+    );
+    await waitFor(() => expect(cancelTwitchLogin).toHaveBeenCalledTimes(2));
+    expect(cancelTwitchLogin).toHaveBeenLastCalledWith(
+      expect.any(String),
+      undefined,
+    );
   });
 
   it("refuses to open a verification URL outside the Twitch origin", async () => {

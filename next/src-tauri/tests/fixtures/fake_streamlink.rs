@@ -19,6 +19,11 @@ fn main() {
         }
     }
     if arguments.iter().any(|argument| argument.contains("/fail")) {
+        eprintln!("Authorization: Bearer raw-output-secret");
+        eprintln!(
+            "resolved=https://cdn.example.test/playlist.m3u8?token=raw-query-secret&sig=signed"
+        );
+        eprintln!("standalone-token=standalone-secret");
         process::exit(7);
     }
 }

@@ -8,6 +8,7 @@ use streamlink_twitch_gui_lib::twitch::auth::{
     ValidationReason,
 };
 use streamlink_twitch_gui_lib::twitch::token_store::{MemoryTokenStore, TokenStore};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Default)]
 struct FakeHttp {
@@ -29,6 +30,16 @@ impl HttpTransport for FakeHttp {
     async fn execute(&self, request: HttpRequest) -> Result<HttpResponse, AuthError> {
         self.requests.lock().unwrap().push(request);
         Ok(self.responses.lock().unwrap().pop_front().unwrap())
+    }
+}
+
+#[derive(Clone)]
+struct PendingHttp;
+
+#[async_trait]
+impl HttpTransport for PendingHttp {
+    async fn execute(&self, _request: HttpRequest) -> Result<HttpResponse, AuthError> {
+        std::future::pending().await
     }
 }
 
@@ -115,6 +126,28 @@ async fn polling_reports_pending_success_expiry_and_denial_without_leaking_secre
     let credentials = store.load().await.unwrap().unwrap();
     assert_eq!(credentials.access_token(), "access-secret");
     assert!(!format!("{credentials:?}").contains("access-secret"));
+}
+
+#[tokio::test]
+async fn cancelling_an_in_flight_poll_cannot_persist_credentials() {
+    let store = MemoryTokenStore::default();
+    let auth = AuthClient::new(
+        "public-client",
+        ["user:read:follows"],
+        PendingHttp,
+        store.clone(),
+    );
+    let cancellation = CancellationToken::new();
+    let poll_cancellation = cancellation.clone();
+    let poll = tokio::spawn(async move {
+        auth.poll_device_login_cancellable("device-code", &poll_cancellation)
+            .await
+    });
+
+    cancellation.cancel();
+
+    assert!(matches!(poll.await.unwrap(), Err(AuthError::Cancelled)));
+    assert!(store.load().await.unwrap().is_none());
 }
 
 #[tokio::test]

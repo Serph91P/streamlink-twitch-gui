@@ -1,12 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { TwitchBackend } from "../../api/backend";
 import type { TwitchLoginChallenge, TwitchSession } from "../../domain/twitch";
 import { twitchQueryKeys } from "../../queries/twitch";
 
 interface LoginAttempt {
+  id: string;
   challenge: TwitchLoginChallenge;
   expiresAt: number;
 }
@@ -27,9 +28,18 @@ export function TwitchAuthPanel({
   session: TwitchSession;
 }) {
   const queryClient = useQueryClient();
+  const attemptIdRef = useRef<string | undefined>(undefined);
   const [attempt, setAttempt] = useState<LoginAttempt>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(
+    () => () => {
+      const attemptId = attemptIdRef.current;
+      if (attemptId) void backend.cancelTwitchLogin(attemptId);
+    },
+    [backend],
+  );
 
   useEffect(() => {
     if (!attempt) return;
@@ -41,12 +51,20 @@ export function TwitchAuthPanel({
 
     const poll = async () => {
       if (Date.now() >= attempt.expiresAt) {
+        await backend.cancelTwitchLogin(attempt.id);
+        if (!active) return;
+        if (attemptIdRef.current === attempt.id) {
+          attemptIdRef.current = undefined;
+        }
         setAttempt(undefined);
         setError("Twitch authorization expired");
         return;
       }
       try {
-        const updated = await backend.pollTwitchLogin(controller.signal);
+        const updated = await backend.pollTwitchLogin(
+          attempt.id,
+          controller.signal,
+        );
         if (!active) return;
         if (updated.status === "authenticated") {
           await queryClient.invalidateQueries({
@@ -54,6 +72,9 @@ export function TwitchAuthPanel({
             refetchType: "none",
           });
           queryClient.setQueryData(twitchQueryKeys.session, updated);
+          if (attemptIdRef.current === attempt.id) {
+            attemptIdRef.current = undefined;
+          }
           setAttempt(undefined);
           setError("");
           return;
@@ -91,21 +112,49 @@ export function TwitchAuthPanel({
   }
 
   async function beginLogin() {
+    const attemptId = crypto.randomUUID();
+    attemptIdRef.current = attemptId;
     setBusy(true);
     setError("");
     try {
-      const challenge = await backend.beginTwitchLogin();
+      const challenge = await backend.beginTwitchLogin(attemptId);
       verificationUri(challenge.verificationUri);
       setAttempt({
+        id: attemptId,
         challenge,
         expiresAt: Date.now() + challenge.expiresInSeconds * 1_000,
       });
       await openVerificationUri(challenge.verificationUri);
     } catch (reason) {
+      await backend.cancelTwitchLogin(attemptId).catch(() => undefined);
+      if (attemptIdRef.current === attemptId) {
+        attemptIdRef.current = undefined;
+      }
       setError(
         reason instanceof Error
           ? reason.message
           : "Could not start Twitch authorization",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelLogin() {
+    if (!attempt) return;
+    setBusy(true);
+    setError("");
+    try {
+      await backend.cancelTwitchLogin(attempt.id);
+      if (attemptIdRef.current === attempt.id) {
+        attemptIdRef.current = undefined;
+      }
+      setAttempt(undefined);
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Could not cancel Twitch authorization",
       );
     } finally {
       setBusy(false);
@@ -165,12 +214,7 @@ export function TwitchAuthPanel({
             >
               Open Twitch
             </button>
-            <button
-              onClick={() => {
-                setAttempt(undefined);
-                setError("");
-              }}
-            >
+            <button disabled={busy} onClick={() => void cancelLogin()}>
               Cancel
             </button>
           </div>

@@ -40,10 +40,18 @@ fn round_trips_schema_versioned_settings_with_atomic_replacement() {
 #[test]
 #[allow(clippy::field_reassign_with_default)]
 fn reports_current_player_availability_without_exposing_its_path() {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     let directory = temp_directory();
     fs::create_dir_all(&directory).unwrap();
     let player = directory.join("player.exe");
+    #[cfg(windows)]
+    fs::copy(std::env::current_exe().unwrap(), &player).unwrap();
+    #[cfg(not(windows))]
     fs::write(&player, b"player").unwrap();
+    #[cfg(unix)]
+    fs::set_permissions(&player, fs::Permissions::from_mode(0o755)).unwrap();
     let store = SettingsStore::new(directory.join("settings.json"));
 
     assert_eq!(store.player_status().unwrap(), PlayerStatus::Unconfigured);
@@ -53,7 +61,7 @@ fn reports_current_player_availability_without_exposing_its_path() {
     store.save(&settings).unwrap();
     assert_eq!(
         store.player_status().unwrap(),
-        PlayerStatus::ConfiguredAvailable
+        PlayerStatus::ConfiguredUsable
     );
 
     fs::remove_file(player).unwrap();
@@ -64,7 +72,36 @@ fn reports_current_player_availability_without_exposing_its_path() {
     );
     assert_eq!(
         store.player_status().unwrap(),
-        PlayerStatus::ConfiguredMissing
+        PlayerStatus::ConfiguredUnavailable
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+#[allow(clippy::field_reassign_with_default)]
+fn distinguishes_usable_players_from_non_executable_files() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = temp_directory();
+    fs::create_dir_all(&directory).unwrap();
+    let player = directory.join("player");
+    fs::write(&player, b"player").unwrap();
+    fs::set_permissions(&player, fs::Permissions::from_mode(0o755)).unwrap();
+    let store = SettingsStore::new(directory.join("settings.json"));
+    let mut settings = AppSettings::default();
+    settings.player.path = Some(player.to_string_lossy().into_owned());
+
+    store.save(&settings).unwrap();
+    assert_eq!(
+        store.player_status().unwrap(),
+        PlayerStatus::ConfiguredUsable
+    );
+
+    fs::set_permissions(&player, fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(
+        store.player_status().unwrap(),
+        PlayerStatus::ConfiguredUnavailable
     );
     fs::remove_dir_all(directory).unwrap();
 }
@@ -72,10 +109,18 @@ fn reports_current_player_availability_without_exposing_its_path() {
 #[test]
 #[allow(clippy::field_reassign_with_default)]
 fn restores_a_saved_streamlink_path_after_the_executable_disappears() {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     let directory = temp_directory();
     fs::create_dir_all(&directory).unwrap();
     let streamlink = directory.join("streamlink.exe");
+    #[cfg(windows)]
+    fs::copy(std::env::current_exe().unwrap(), &streamlink).unwrap();
+    #[cfg(not(windows))]
     fs::write(&streamlink, b"streamlink").unwrap();
+    #[cfg(unix)]
+    fs::set_permissions(&streamlink, fs::Permissions::from_mode(0o755)).unwrap();
     let store = SettingsStore::new(directory.join("settings.json"));
     let mut settings = AppSettings::default();
     settings.streamlink_path = Some(streamlink.to_string_lossy().into_owned());
@@ -86,6 +131,28 @@ fn restores_a_saved_streamlink_path_after_the_executable_disappears() {
     assert_eq!(
         store.load().unwrap().streamlink_path,
         settings.streamlink_path
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+#[allow(clippy::field_reassign_with_default)]
+fn rejects_a_non_binary_file_with_an_exe_extension() {
+    let directory = temp_directory();
+    fs::create_dir_all(&directory).unwrap();
+    let player = directory.join("not-a-player.exe");
+    fs::write(&player, b"not a Windows executable").unwrap();
+    let store = SettingsStore::new(directory.join("settings.json"));
+    let mut settings = AppSettings::default();
+    settings.player.path = Some(player.to_string_lossy().into_owned());
+
+    assert!(
+        store
+            .save(&settings)
+            .unwrap_err()
+            .to_string()
+            .contains("not an executable file")
     );
     fs::remove_dir_all(directory).unwrap();
 }

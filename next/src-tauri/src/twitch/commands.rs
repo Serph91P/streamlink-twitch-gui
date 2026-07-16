@@ -8,11 +8,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::domain::stream::{TwitchLoginChallenge, TwitchSession, TwitchUser};
 use crate::twitch::auth::{
-    AuthClient, AuthError, ConfigError, DeviceLoginAttempt, PollResult, ReqwestTransport,
-    TwitchConfig, ValidatedIdentity, ValidationReason,
+    AuthClient, AuthError, ConfigError, PollResult, ReqwestTransport, TwitchConfig,
+    ValidatedIdentity, ValidationReason,
 };
 use crate::twitch::client::{HelixClient, StoredTokenProvider, TokioSleeper};
 use crate::twitch::lifecycle::{LifecycleError, SessionLifecycle, ValidationRunner};
+use crate::twitch::login::{LoginRegistry, clear_cancelled_login};
 use crate::twitch::models::{FollowedChannel, Game, SearchChannel, Stream, User};
 use crate::twitch::pagination::Page;
 use crate::twitch::token_store::OsTokenStore;
@@ -33,9 +34,10 @@ pub(crate) struct DesktopLifecycle {
 pub struct TwitchState {
     auth: DesktopAuth,
     helix: DesktopHelix,
-    login: Mutex<Option<DeviceLoginAttempt>>,
+    login: Mutex<LoginRegistry>,
     session: Arc<Mutex<TwitchSession>>,
     validation: ValidationRunner<DesktopLifecycle>,
+    credential_gate: Arc<Mutex<()>>,
 }
 
 impl TwitchState {
@@ -66,14 +68,17 @@ impl TwitchState {
         Ok(Self {
             auth,
             helix,
-            login: Mutex::new(None),
+            login: Mutex::new(LoginRegistry::default()),
             session,
             validation,
+            credential_gate: Arc::new(Mutex::new(())),
         })
     }
 
-    pub(crate) fn validation_runner(&self) -> ValidationRunner<DesktopLifecycle> {
-        self.validation.clone()
+    pub(crate) fn validation_schedule(
+        &self,
+    ) -> (ValidationRunner<DesktopLifecycle>, Arc<Mutex<()>>) {
+        (self.validation.clone(), self.credential_gate.clone())
     }
 }
 
@@ -89,46 +94,89 @@ pub async fn get_twitch_session(state: State<'_, TwitchState>) -> Result<TwitchS
 #[tauri::command]
 pub async fn begin_twitch_login(
     state: State<'_, TwitchState>,
+    attempt_id: String,
 ) -> Result<TwitchLoginChallenge, String> {
     let attempt = state.auth.begin_device_login().await.map_err(safe_error)?;
     let challenge = attempt.challenge.clone();
-    *state.login.lock().await = Some(attempt);
+    state
+        .login
+        .lock()
+        .await
+        .install(attempt_id, attempt.device_code())
+        .map_err(safe_error)?;
     Ok(challenge)
 }
 
 #[tauri::command]
-pub async fn poll_twitch_login(state: State<'_, TwitchState>) -> Result<TwitchSession, String> {
-    let device_code = state
+pub async fn poll_twitch_login(
+    state: State<'_, TwitchState>,
+    attempt_id: String,
+) -> Result<TwitchSession, String> {
+    let (device_code, cancellation) = state
         .login
         .lock()
         .await
-        .as_ref()
-        .map(|attempt| attempt.device_code().to_owned())
-        .ok_or_else(|| "Twitch login has not started".to_owned())?;
-    if state
+        .poll(&attempt_id)
+        .map_err(safe_error)?;
+    let _credential_guard = state.credential_gate.lock().await;
+    let result = state
         .auth
-        .poll_device_login(&device_code)
-        .await
-        .map_err(safe_error)?
-        == PollResult::Pending
-    {
-        return Ok(state.session.lock().await.clone());
+        .poll_device_login_cancellable(&device_code, &cancellation)
+        .await;
+    match result {
+        Ok(PollResult::Pending) => return Ok(state.session.lock().await.clone()),
+        Ok(PollResult::Complete) => {}
+        Err(error) => {
+            state.login.lock().await.complete(&attempt_id);
+            if matches!(error, AuthError::Cancelled) {
+                clear_cancelled_login(&state.auth, state.session.as_ref())
+                    .await
+                    .map_err(safe_error)?;
+            }
+            return Err(safe_error(error));
+        }
     }
-    *state.login.lock().await = None;
+    if cancellation.is_cancelled() {
+        clear_cancelled_login(&state.auth, state.session.as_ref())
+            .await
+            .map_err(safe_error)?;
+        return Err(safe_error(AuthError::Cancelled));
+    }
     state
         .validation
         .run_once(ValidationReason::Startup)
         .await
         .map_err(safe_error)?;
+    if cancellation.is_cancelled() || !state.login.lock().await.complete(&attempt_id) {
+        clear_cancelled_login(&state.auth, state.session.as_ref())
+            .await
+            .map_err(safe_error)?;
+        return Err(safe_error(AuthError::Cancelled));
+    }
     Ok(state.session.lock().await.clone())
 }
 
 #[tauri::command]
+pub async fn cancel_twitch_login(
+    state: State<'_, TwitchState>,
+    attempt_id: String,
+) -> Result<(), String> {
+    if !state.login.lock().await.cancel(&attempt_id) {
+        return Ok(());
+    }
+    let _credential_guard = state.credential_gate.lock().await;
+    clear_cancelled_login(&state.auth, state.session.as_ref())
+        .await
+        .map_err(safe_error)
+}
+
+#[tauri::command]
 pub async fn sign_out_twitch(state: State<'_, TwitchState>) -> Result<(), String> {
-    state.auth.sign_out().await.map_err(safe_error)?;
-    *state.login.lock().await = None;
-    *state.session.lock().await = TwitchSession::Anonymous;
-    Ok(())
+    state.login.lock().await.cancel_active();
+    let _credential_guard = state.credential_gate.lock().await;
+    clear_cancelled_login(&state.auth, state.session.as_ref())
+        .await
+        .map_err(safe_error)
 }
 
 async fn load_session(
@@ -186,9 +234,15 @@ impl SessionLifecycle for DesktopLifecycle {
     }
 }
 
-pub async fn run_validation_schedule<B: SessionLifecycle>(runner: ValidationRunner<B>) {
-    if let Err(error) = runner.run_once(ValidationReason::Startup).await {
-        eprintln!("{error}");
+pub async fn run_validation_schedule<B: SessionLifecycle>(
+    runner: ValidationRunner<B>,
+    credential_gate: Arc<Mutex<()>>,
+) {
+    {
+        let _credential_guard = credential_gate.lock().await;
+        if let Err(error) = runner.run_once(ValidationReason::Startup).await {
+            eprintln!("{error}");
+        }
     }
     let mut interval = tokio::time::interval_at(
         tokio::time::Instant::now() + std::time::Duration::from_secs(60 * 60),
@@ -196,6 +250,7 @@ pub async fn run_validation_schedule<B: SessionLifecycle>(runner: ValidationRunn
     );
     loop {
         interval.tick().await;
+        let _credential_guard = credential_gate.lock().await;
         if let Err(error) = runner.run_once(ValidationReason::Hourly).await {
             eprintln!("{error}");
         }

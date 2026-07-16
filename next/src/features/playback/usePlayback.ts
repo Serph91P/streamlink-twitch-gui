@@ -32,6 +32,11 @@ export function usePlayback(
         variantName: name,
         codecs: codec ? [codec] : [],
       });
+      if (result.status !== "running") {
+        throw new Error(
+          result.diagnostics[0] ?? "Playback exited before it could start",
+        );
+      }
       setDiagnostics(result.diagnostics);
       setStatus("running");
     } catch (error) {

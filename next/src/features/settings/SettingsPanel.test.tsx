@@ -82,13 +82,13 @@ describe("SettingsPanel", () => {
     expect(getPlayerStatus).toHaveBeenCalledOnce();
   });
 
-  it("reports a configured player only when its executable is available", async () => {
+  it("reports a configured player only when its executable is usable", async () => {
     const settings = {
       ...defaultSettings,
       player: { path: "/usr/bin/mpv", arguments: [] },
     };
     const backend = new BrowserBackend({
-      getPlayerStatus: async () => ({ state: "configuredAvailable" }),
+      getPlayerStatus: async () => ({ state: "configuredUsable" }),
     });
 
     render(
@@ -100,18 +100,18 @@ describe("SettingsPanel", () => {
     );
 
     expect(
-      await screen.findByText("Configured player is available."),
+      await screen.findByText("Configured player is usable."),
     ).toBeVisible();
     expect(screen.getByText("/usr/bin/mpv")).toBeVisible();
   });
 
-  it("reports when a configured player executable has disappeared", async () => {
+  it("gives remediation when a configured player is unavailable", async () => {
     const settings = {
       ...defaultSettings,
       player: { path: "C:\\Tools\\mpv.exe", arguments: [] },
     };
     const backend = new BrowserBackend({
-      getPlayerStatus: async () => ({ state: "configuredMissing" }),
+      getPlayerStatus: async () => ({ state: "configuredUnavailable" }),
     });
 
     render(
@@ -123,10 +123,12 @@ describe("SettingsPanel", () => {
     );
 
     expect(
-      await screen.findByText("Configured player is missing."),
+      await screen.findByText("Configured player cannot be used."),
     ).toBeVisible();
     expect(screen.getByText("C:\\Tools\\mpv.exe")).toBeVisible();
-    expect(screen.getByText(/Choose an existing executable/)).toBeVisible();
+    expect(
+      screen.getByText(/Choose an executable file you can run/),
+    ).toBeVisible();
   });
 
   it("reports a missing Streamlink probe without claiming detection", async () => {
@@ -169,7 +171,7 @@ describe("SettingsPanel", () => {
 
     expect(screen.getByText("Player is not configured.")).toBeVisible();
     expect(
-      screen.queryByText("Configured player is available."),
+      screen.queryByText("Configured player is usable."),
     ).not.toBeInTheDocument();
   });
 

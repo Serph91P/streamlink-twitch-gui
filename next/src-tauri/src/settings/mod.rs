@@ -10,8 +10,8 @@ pub use crate::domain::stream::Settings as AppSettings;
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum PlayerStatus {
     Unconfigured,
-    ConfiguredAvailable,
-    ConfiguredMissing,
+    ConfiguredUsable,
+    ConfiguredUnavailable,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -88,8 +88,8 @@ impl SettingsStore {
         validate(&settings, false)?;
         Ok(match settings.player.path {
             None => PlayerStatus::Unconfigured,
-            Some(path) if Path::new(&path).is_file() => PlayerStatus::ConfiguredAvailable,
-            Some(_) => PlayerStatus::ConfiguredMissing,
+            Some(path) if executable_is_usable(Path::new(&path)) => PlayerStatus::ConfiguredUsable,
+            Some(_) => PlayerStatus::ConfiguredUnavailable,
         })
     }
 }
@@ -143,9 +143,9 @@ fn validate(settings: &AppSettings, require_executable_files: bool) -> Result<()
             if path.trim().is_empty() {
                 return Err(SettingsError::Validation(format!("{name} cannot be empty")));
             }
-            if require_executable_files && !Path::new(path).is_file() {
+            if require_executable_files && !executable_is_usable(Path::new(path)) {
                 return Err(SettingsError::Validation(format!(
-                    "{name} does not exist or is not a file"
+                    "{name} does not exist or is not an executable file"
                 )));
             }
         }
@@ -169,6 +169,60 @@ fn validate(settings: &AppSettings, require_executable_files: bool) -> Result<()
         ));
     }
     Ok(())
+}
+
+fn executable_is_usable(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(windows)]
+    {
+        windows_executable_is_usable(path)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        true
+    }
+}
+
+#[cfg(windows)]
+fn windows_executable_is_usable(path: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetBinaryTypeW;
+
+    if !has_windows_executable_extension(path) {
+        return false;
+    }
+    let path = path
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let mut binary_type = u32::MAX;
+    let recognized = unsafe { GetBinaryTypeW(path.as_ptr(), &mut binary_type) != 0 };
+    recognized && windows_binary_type_is_usable(binary_type)
+}
+
+#[cfg(any(test, windows))]
+fn has_windows_executable_extension(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| {
+        extension.eq_ignore_ascii_case("exe") || extension.eq_ignore_ascii_case("com")
+    })
+}
+
+#[cfg(any(test, windows))]
+const fn windows_binary_type_is_usable(binary_type: u32) -> bool {
+    matches!(binary_type, 0 | 6)
 }
 
 fn validate_text(name: &str, value: &str) -> Result<(), SettingsError> {
@@ -206,4 +260,29 @@ pub fn save_settings(
     state.0.save(&settings).map_err(|error| error.to_string())?;
     crate::desktop::apply_runtime_settings(&app, &runtime, &settings)?;
     Ok(settings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{has_windows_executable_extension, windows_binary_type_is_usable};
+    use std::path::Path;
+
+    #[test]
+    fn windows_player_contract_accepts_only_native_executable_extensions() {
+        assert!(has_windows_executable_extension(Path::new(
+            "C:\\Tools\\mpv.EXE"
+        )));
+        assert!(has_windows_executable_extension(Path::new(
+            "C:\\Tools\\player.com"
+        )));
+        assert!(!has_windows_executable_extension(Path::new(
+            "C:\\Tools\\notes.txt"
+        )));
+        assert!(!has_windows_executable_extension(Path::new(
+            "C:\\Tools\\player"
+        )));
+        assert!(windows_binary_type_is_usable(0));
+        assert!(windows_binary_type_is_usable(6));
+        assert!(!windows_binary_type_is_usable(1));
+    }
 }

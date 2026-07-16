@@ -349,18 +349,20 @@ export function SettingsPanel({
               </>
             ) : null}
             {playerStatus.state === "probed" &&
-            playerStatus.value.state === "configuredAvailable" ? (
+            playerStatus.value.state === "configuredUsable" ? (
               <>
-                <strong>Configured player is available.</strong>
+                <strong>Configured player is usable.</strong>
                 <span>{savedPlayerPath}</span>
               </>
             ) : null}
             {playerStatus.state === "probed" &&
-            playerStatus.value.state === "configuredMissing" ? (
+            playerStatus.value.state === "configuredUnavailable" ? (
               <>
-                <strong>Configured player is missing.</strong>
+                <strong>Configured player cannot be used.</strong>
                 <span>{savedPlayerPath}</span>
-                <span>Choose an existing executable and save settings.</span>
+                <span>
+                  Choose an executable file you can run and save settings.
+                </span>
               </>
             ) : null}
             {playerStatus.state === "error" ? (

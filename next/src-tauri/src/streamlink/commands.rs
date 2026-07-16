@@ -163,6 +163,8 @@ fn launch_stream_inner(
     })
     .map_err(|error| error.to_string())?;
     let process = launch_playback(&detection.executable, arguments.clone())
+        .map_err(|error| error.to_string())?
+        .accept(Duration::from_millis(750))
         .map_err(|error| error.to_string())?;
     let mut active = playback
         .0

@@ -53,7 +53,7 @@ export interface StreamlinkStatus {
 }
 
 export type PlayerStatus = {
-  state: "unconfigured" | "configuredAvailable" | "configuredMissing";
+  state: "unconfigured" | "configuredUsable" | "configuredUnavailable";
 };
 
 export type MigrationOutcome =
@@ -93,8 +93,15 @@ export interface LegacyMigrationBackend {
 
 export interface TwitchBackend {
   getSession(signal?: AbortSignal): Promise<TwitchSession>;
-  beginTwitchLogin(signal?: AbortSignal): Promise<TwitchLoginChallenge>;
-  pollTwitchLogin(signal?: AbortSignal): Promise<TwitchSession>;
+  beginTwitchLogin(
+    attemptId: string,
+    signal?: AbortSignal,
+  ): Promise<TwitchLoginChallenge>;
+  pollTwitchLogin(
+    attemptId: string,
+    signal?: AbortSignal,
+  ): Promise<TwitchSession>;
+  cancelTwitchLogin(attemptId: string, signal?: AbortSignal): Promise<void>;
   signOut(signal?: AbortSignal): Promise<void>;
   users(
     logins: string[],
@@ -202,15 +209,40 @@ export class TauriBackend implements AppBackend {
     );
   }
 
-  async beginTwitchLogin(signal?: AbortSignal): Promise<TwitchLoginChallenge> {
+  async beginTwitchLogin(
+    attemptId: string,
+    signal?: AbortSignal,
+  ): Promise<TwitchLoginChallenge> {
+    throwIfAborted(signal);
     return parseTwitchLoginChallenge(
-      await detachOnAbort(invokeCommand("begin_twitch_login"), signal),
+      await detachOnAbort(
+        invokeCommand("begin_twitch_login", { attemptId }),
+        signal,
+      ),
     );
   }
 
-  async pollTwitchLogin(signal?: AbortSignal): Promise<TwitchSession> {
+  async pollTwitchLogin(
+    attemptId: string,
+    signal?: AbortSignal,
+  ): Promise<TwitchSession> {
+    throwIfAborted(signal);
     return parseTwitchSession(
-      await detachOnAbort(invokeCommand("poll_twitch_login"), signal),
+      await detachOnAbort(
+        invokeCommand("poll_twitch_login", { attemptId }),
+        signal,
+      ),
+    );
+  }
+
+  async cancelTwitchLogin(
+    attemptId: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    throwIfAborted(signal);
+    await detachOnAbort(
+      invokeCommand("cancel_twitch_login", { attemptId }),
+      signal,
     );
   }
 
@@ -346,21 +378,37 @@ export class BrowserBackend implements AppBackend {
     return this.overrides.getSession?.(signal) ?? { status: "anonymous" };
   }
 
-  async beginTwitchLogin(signal?: AbortSignal): Promise<TwitchLoginChallenge> {
+  async beginTwitchLogin(
+    attemptId: string,
+    signal?: AbortSignal,
+  ): Promise<TwitchLoginChallenge> {
+    throwIfAborted(signal);
+    return await (this.overrides.beginTwitchLogin?.(attemptId, signal) ?? {
+      verificationUri: "https://www.twitch.tv/activate",
+      userCode: "TEST-CODE",
+      expiresInSeconds: 600,
+      pollingIntervalSeconds: 5,
+    });
+  }
+
+  async pollTwitchLogin(
+    attemptId: string,
+    signal?: AbortSignal,
+  ): Promise<TwitchSession> {
     throwIfAborted(signal);
     return (
-      this.overrides.beginTwitchLogin?.(signal) ?? {
-        verificationUri: "https://www.twitch.tv/activate",
-        userCode: "TEST-CODE",
-        expiresInSeconds: 600,
-        pollingIntervalSeconds: 5,
+      this.overrides.pollTwitchLogin?.(attemptId, signal) ?? {
+        status: "anonymous",
       }
     );
   }
 
-  async pollTwitchLogin(signal?: AbortSignal): Promise<TwitchSession> {
+  async cancelTwitchLogin(
+    attemptId: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
     throwIfAborted(signal);
-    return this.overrides.pollTwitchLogin?.(signal) ?? { status: "anonymous" };
+    await this.overrides.cancelTwitchLogin?.(attemptId, signal);
   }
 
   async signOut(signal?: AbortSignal): Promise<void> {

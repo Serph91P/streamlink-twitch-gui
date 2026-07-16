@@ -32,7 +32,7 @@ describe("browser backend", () => {
     const backend = new BrowserBackend();
     const values = [
       await backend.getSession(),
-      await backend.beginTwitchLogin(),
+      await backend.beginTwitchLogin("public-test-attempt"),
     ];
 
     expect(JSON.stringify(values)).not.toMatch(
@@ -65,12 +65,39 @@ describe("tauri legacy migration backend", () => {
 
 describe("tauri prerequisite status backend", () => {
   it("probes player availability without sending or receiving a path", async () => {
-    invoke.mockResolvedValue({ state: "configuredMissing" });
+    invoke.mockResolvedValue({ state: "configuredUnavailable" });
 
     await expect(new TauriBackend().getPlayerStatus()).resolves.toEqual({
-      state: "configuredMissing",
+      state: "configuredUnavailable",
     });
     expect(invoke).toHaveBeenCalledWith("get_player_status", undefined);
+  });
+});
+
+describe("tauri Twitch login cancellation", () => {
+  it("uses one attempt ID across begin, poll, and idempotent cancellation", async () => {
+    invoke
+      .mockResolvedValueOnce({
+        verificationUri: "https://www.twitch.tv/activate",
+        userCode: "ABCD-EFGH",
+        expiresInSeconds: 600,
+        pollingIntervalSeconds: 5,
+      })
+      .mockResolvedValueOnce({ status: "anonymous" })
+      .mockResolvedValue(undefined);
+    const backend = new TauriBackend();
+
+    await backend.beginTwitchLogin("attempt-1");
+    await backend.pollTwitchLogin("attempt-1");
+    await backend.cancelTwitchLogin("attempt-1");
+    await backend.cancelTwitchLogin("attempt-1");
+
+    expect(invoke.mock.calls).toEqual([
+      ["begin_twitch_login", { attemptId: "attempt-1" }],
+      ["poll_twitch_login", { attemptId: "attempt-1" }],
+      ["cancel_twitch_login", { attemptId: "attempt-1" }],
+      ["cancel_twitch_login", { attemptId: "attempt-1" }],
+    ]);
   });
 });
 
