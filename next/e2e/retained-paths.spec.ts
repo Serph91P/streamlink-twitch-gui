@@ -38,6 +38,21 @@ async function mockDesktopBoundary(page: Page) {
         "https://static-cdn.jtvnw.net/jtv_user_pictures/signalnoise.png",
       isLive: true,
     };
+    const authenticatedSession = {
+      status: "authenticated",
+      user: {
+        id: "user-1",
+        login: "signalnoise",
+        displayName: "Signal Noise",
+        profileImageUrl: channel.thumbnailUrl,
+      },
+      expiresAt: "2026-07-12T12:00:00Z",
+    };
+    let session: { status: string; user?: unknown; expiresAt?: string } =
+      new URLSearchParams(window.location.search).get("e2eSession") ===
+      "anonymous"
+        ? { status: "anonymous" }
+        : authenticatedSession;
     const calls: Array<{ command: string; args: unknown }> = [];
     Object.assign(window, { __e2eCalls: calls });
     Object.assign(window, {
@@ -49,17 +64,31 @@ async function mockDesktopBoundary(page: Page) {
               return settings;
             case "save_settings":
               return args.settings;
-            case "get_twitch_session":
+            case "get_streamlink_status":
               return {
-                status: "authenticated",
-                user: {
-                  id: "user-1",
-                  login: "signalnoise",
-                  displayName: "Signal Noise",
-                  profileImageUrl: channel.thumbnailUrl,
-                },
-                expiresAt: "2026-07-12T12:00:00Z",
+                source: "path",
+                version: { major: 8, minor: 4, patch: 0 },
+                compatibility: "supported",
               };
+            case "get_player_status":
+              return { state: "unconfigured" };
+            case "get_twitch_session":
+              return session;
+            case "begin_twitch_login":
+              return {
+                verificationUri: "https://www.twitch.tv/activate",
+                userCode: "E2E-CODE",
+                expiresInSeconds: 60,
+                pollingIntervalSeconds: 1,
+              };
+            case "plugin:opener|open_url":
+              return null;
+            case "poll_twitch_login":
+              session = authenticatedSession;
+              return session;
+            case "sign_out_twitch":
+              session = { status: "anonymous" };
+              return null;
             case "twitch_streams":
             case "twitch_followed_streams":
               return { items: [stream] };
@@ -185,6 +214,62 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
 });
 
+test("moves from anonymous device login through detection and playback", async ({
+  page,
+}) => {
+  await page.goto("/?e2eSession=anonymous");
+  await expect(page.getByText("Sign in with Twitch to browse")).toBeVisible();
+  await page.getByRole("button", { name: "Sign in with Twitch" }).click();
+  await expect(page.getByText("E2E-CODE")).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText(
+    "Waiting for Twitch authorization...",
+  );
+
+  await expect(page.getByRole("heading", { name: "Live now" })).toBeVisible();
+  await expect(page.getByText("Building a tiny synthesizer")).toBeVisible();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByText("Detected Streamlink 8.4.0")).toBeVisible();
+
+  await page.getByRole("button", { name: "Search" }).click();
+  await page.getByRole("searchbox", { name: "Channel name" }).fill("signal");
+  await page
+    .getByRole("search")
+    .getByRole("button", { name: "Search", exact: true })
+    .click();
+  await page.getByRole("button", { name: /Signal Noise/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Choose the broadcast signal" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Launch stream" }).click();
+  await expect(page.getByText("Playing externally")).toBeVisible();
+  await page.getByRole("button", { name: "Stop playback" }).click();
+  await expect(
+    page.getByRole("button", { name: "Launch stream" }),
+  ).toBeVisible();
+
+  const commands = await page.evaluate(() =>
+    (
+      window as typeof window & {
+        __e2eCalls: Array<{ command: string }>;
+      }
+    ).__e2eCalls.map((call) => call.command),
+  );
+  for (const command of [
+    "get_twitch_session",
+    "begin_twitch_login",
+    "plugin:opener|open_url",
+    "poll_twitch_login",
+    "twitch_streams",
+    "get_streamlink_status",
+    "twitch_search_channels",
+    "inspect_streams",
+    "launch_stream",
+    "stop_stream",
+  ]) {
+    expect(commands).toContain(command);
+  }
+});
+
 test("meets WCAG 2 A and AA on the primary route", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Live now" })).toBeVisible();
 
@@ -209,7 +294,7 @@ test("browses public and followed content", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Following live" }),
   ).toBeVisible();
-  await expect(page.getByText("Signal Noise")).toBeVisible();
+  await expect(page.getByRole("link", { name: /Signal Noise/ })).toBeVisible();
 
   await page.getByRole("button", { name: "Channels" }).click();
   await expect(

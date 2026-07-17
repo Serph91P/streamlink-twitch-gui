@@ -5,7 +5,23 @@ import { BrowserBackend, defaultSettings } from "./api/backend";
 import { App } from "./App";
 import { liveStream, topGame } from "./test/fixtures/twitch";
 
+const openUrl = vi.hoisted(() => vi.fn());
+
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl }));
+
+const authenticatedSession = {
+  status: "authenticated" as const,
+  user: {
+    id: "user-1",
+    login: "viewer",
+    displayName: "Viewer",
+    profileImageUrl: "",
+  },
+  expiresAt: "2030-01-01T00:00:00Z",
+};
+
 afterEach(() => {
+  openUrl.mockReset();
   document.documentElement.removeAttribute("data-theme");
   document.documentElement.removeAttribute("lang");
 });
@@ -56,6 +72,7 @@ describe("application settings", () => {
 describe("browsing experience", () => {
   it("renders live streams and exposes every browse destination as navigation", async () => {
     const backend = new BrowserBackend({
+      getSession: async () => authenticatedSession,
       streams: async () => ({ items: [liveStream] }),
       topGames: async () => ({ items: [topGame] }),
     });
@@ -82,14 +99,7 @@ describe("browsing experience", () => {
   it("loads followed streams, followed channels and category routes", async () => {
     const backend = new BrowserBackend({
       getSession: async () => ({
-        status: "authenticated",
-        user: {
-          id: "user-1",
-          login: "viewer",
-          displayName: "Viewer",
-          profileImageUrl: "",
-        },
-        expiresAt: "2030-01-01T00:00:00Z",
+        ...authenticatedSession,
       }),
       followedStreams: async () => ({ items: [liveStream] }),
       followedChannels: async () => ({
@@ -132,7 +142,10 @@ describe("browsing experience", () => {
     const pending = new Promise<{ items: [] }>((resolve) => {
       resolveStreams = resolve;
     });
-    const backend = new BrowserBackend({ streams: async () => pending });
+    const backend = new BrowserBackend({
+      getSession: async () => authenticatedSession,
+      streams: async () => pending,
+    });
     const { unmount } = render(<App backend={backend} />);
     expect(await screen.findByText("Tuning the live feed...")).toBeVisible();
 
@@ -140,6 +153,7 @@ describe("browsing experience", () => {
     expect(await screen.findByText("No live channels found")).toBeVisible();
 
     const failing = new BrowserBackend({
+      getSession: async () => authenticatedSession,
       streams: async () => ({ items: [] }),
       searchChannels: async () => ({
         items: [
@@ -174,5 +188,194 @@ describe("browsing experience", () => {
       expect(screen.getByText("Signal Noise is offline")).toBeVisible(),
     );
     expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
+  });
+
+  it("guides anonymous users to sign in without firing Helix queries", async () => {
+    const streams = vi.fn(async () => ({ items: [] }));
+    const topGames = vi.fn(async () => ({ items: [] }));
+    const followedStreams = vi.fn(async () => ({ items: [] }));
+    const followedChannels = vi.fn(async () => ({ items: [] }));
+    const searchChannels = vi.fn(async () => ({ items: [] }));
+    const searchCategories = vi.fn(async () => ({ items: [] }));
+    const backend = new BrowserBackend({
+      getSession: async () => ({ status: "anonymous" }),
+      streams,
+      topGames,
+      followedStreams,
+      followedChannels,
+      searchChannels,
+      searchCategories,
+    });
+    render(<App backend={backend} />);
+
+    expect(
+      await screen.findByText("Sign in with Twitch to browse"),
+    ).toBeVisible();
+    for (const name of [
+      "Following",
+      "Channels",
+      "Categories",
+      "Search",
+      "Live",
+    ]) {
+      fireEvent.click(screen.getByRole("button", { name }));
+      expect(
+        await screen.findByRole("button", { name: "Sign in with Twitch" }),
+      ).toBeVisible();
+    }
+
+    expect(streams).not.toHaveBeenCalled();
+    expect(topGames).not.toHaveBeenCalled();
+    expect(followedStreams).not.toHaveBeenCalled();
+    expect(followedChannels).not.toHaveBeenCalled();
+    expect(searchChannels).not.toHaveBeenCalled();
+    expect(searchCategories).not.toHaveBeenCalled();
+  });
+
+  it("waits for restored startup credentials before loading Twitch data", async () => {
+    let restoreSession!: (session: typeof authenticatedSession) => void;
+    const getSession = vi.fn(
+      () =>
+        new Promise<typeof authenticatedSession>((resolve) => {
+          restoreSession = resolve;
+        }),
+    );
+    const streams = vi.fn(async () => ({ items: [liveStream] }));
+    const backend = new BrowserBackend({ getSession, streams });
+    render(<App backend={backend} />);
+
+    expect(await screen.findByText("Checking Twitch session...")).toBeVisible();
+    expect(streams).not.toHaveBeenCalled();
+
+    restoreSession(authenticatedSession);
+
+    expect(
+      await screen.findByRole("link", { name: /Signal Noise/ }),
+    ).toBeVisible();
+    expect(getSession).toHaveBeenCalledOnce();
+    expect(streams).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByText("Sign in with Twitch to browse"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("completes device authorization, refreshes Twitch data, and signs out", async () => {
+    const pollTwitchLogin = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "anonymous" })
+      .mockResolvedValueOnce(authenticatedSession);
+    const signOut = vi.fn(async () => undefined);
+    const cancelTwitchLogin = vi.fn(async () => undefined);
+    const streams = vi.fn(async () => ({ items: [liveStream] }));
+    const backend = new BrowserBackend({
+      getSession: async () => ({ status: "anonymous" }),
+      beginTwitchLogin: async () => ({
+        verificationUri: "https://www.twitch.tv/activate",
+        userCode: "ABCD-EFGH",
+        expiresInSeconds: 10,
+        pollingIntervalSeconds: 1,
+      }),
+      pollTwitchLogin,
+      cancelTwitchLogin,
+      signOut,
+      streams,
+    });
+    render(<App backend={backend} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Sign in with Twitch" }),
+    );
+    expect(await screen.findByText("ABCD-EFGH")).toBeVisible();
+    expect(screen.getByText("https://www.twitch.tv/activate")).toBeVisible();
+    expect(openUrl).toHaveBeenCalledWith("https://www.twitch.tv/activate");
+
+    expect(
+      await screen.findByText("Signed in as Viewer", {}, { timeout: 3_000 }),
+    ).toBeVisible();
+    expect(pollTwitchLogin).toHaveBeenCalledTimes(2);
+    expect(cancelTwitchLogin).not.toHaveBeenCalled();
+    expect(
+      await screen.findByRole("link", { name: /Signal Noise/ }),
+    ).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(signOut).toHaveBeenCalledOnce());
+    expect(
+      await screen.findByRole("button", { name: "Sign in with Twitch" }),
+    ).toBeVisible();
+  });
+
+  it("expires and cancels device authorization without polling loops", async () => {
+    const pollTwitchLogin = vi.fn(async () => ({
+      status: "anonymous" as const,
+    }));
+    const cancelTwitchLogin = vi.fn(async () => undefined);
+    const backend = new BrowserBackend({
+      getSession: async () => ({ status: "anonymous" }),
+      beginTwitchLogin: async () => ({
+        verificationUri: "https://www.twitch.tv/activate",
+        userCode: "SHORT-LIVED",
+        expiresInSeconds: 1,
+        pollingIntervalSeconds: 1,
+      }),
+      pollTwitchLogin,
+      cancelTwitchLogin,
+    });
+    const { unmount } = render(<App backend={backend} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Sign in with Twitch" }),
+    );
+    expect(
+      await screen.findByText(
+        "Twitch authorization expired",
+        {},
+        { timeout: 2_000 },
+      ),
+    ).toBeVisible();
+    expect(pollTwitchLogin).not.toHaveBeenCalled();
+    await waitFor(() => expect(cancelTwitchLogin).toHaveBeenCalledOnce());
+    expect(cancelTwitchLogin).toHaveBeenLastCalledWith(
+      expect.any(String),
+      undefined,
+    );
+
+    unmount();
+    render(<App backend={backend} />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Sign in with Twitch" }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(screen.queryByText("SHORT-LIVED")).not.toBeInTheDocument(),
+    );
+    await waitFor(() => expect(cancelTwitchLogin).toHaveBeenCalledTimes(2));
+    expect(cancelTwitchLogin).toHaveBeenLastCalledWith(
+      expect.any(String),
+      undefined,
+    );
+  });
+
+  it("refuses to open a verification URL outside the Twitch origin", async () => {
+    const backend = new BrowserBackend({
+      getSession: async () => ({ status: "anonymous" }),
+      beginTwitchLogin: async () => ({
+        verificationUri: "https://example.test/activate",
+        userCode: "UNTRUSTED",
+        expiresInSeconds: 600,
+        pollingIntervalSeconds: 5,
+      }),
+    });
+    render(<App backend={backend} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Sign in with Twitch" }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "unsupported verification URL",
+    );
+    expect(openUrl).not.toHaveBeenCalled();
+    expect(screen.queryByText("UNTRUSTED")).not.toBeInTheDocument();
   });
 });

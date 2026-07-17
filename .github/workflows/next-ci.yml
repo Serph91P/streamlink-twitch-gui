@@ -113,6 +113,44 @@ jobs:
           cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
           cargo test --manifest-path src-tauri/Cargo.toml --all-features
 
+  windows-startup-error:
+    name: Windows release startup error
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-startup-${{ runner.os }}-${{ hashFiles('next/src-tauri/Cargo.lock') }}
+      - name: Prepare frontend distribution
+        working-directory: next
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force dist | Out-Null
+      - name: Test Windows-specific contracts
+        working-directory: next
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml --all-features --lib
+          cargo test --manifest-path src-tauri/Cargo.toml --all-features --test settings_store
+          cargo test --manifest-path src-tauri/Cargo.toml --all-features --test startup_failure
+          cargo test --manifest-path src-tauri/Cargo.toml --all-features --test streamlink_process
+      - name: Build release executable without Twitch configuration
+        working-directory: next
+        shell: pwsh
+        run: |
+          Remove-Item Env:TWITCH_CLIENT_ID -ErrorAction SilentlyContinue
+          cargo build --manifest-path src-tauri/Cargo.toml --release
+      - name: Verify visible release startup failure
+        working-directory: next
+        shell: pwsh
+        run: >-
+          ../scripts/verify_windows_startup_error.ps1
+          -Executable src-tauri/target/release/streamlink-twitch-gui.exe
+
   streamlink-contract:
     name: Streamlink ${{ matrix.streamlink }} contract
     needs: changes
@@ -205,6 +243,7 @@ jobs:
       - changes
       - frontend
       - rust
+      - windows-startup-error
       - streamlink-contract
       - bundle-smoke
     runs-on: ubuntu-24.04

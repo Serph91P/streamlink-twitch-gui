@@ -3,6 +3,7 @@ use std::fmt;
 use async_trait::async_trait;
 use serde::Deserialize;
 use thiserror::Error;
+use tokio_util::sync::CancellationToken;
 
 use crate::domain::stream::TwitchLoginChallenge;
 use crate::twitch::token_store::{Credentials, TokenStore, TokenStoreError};
@@ -113,6 +114,10 @@ impl HttpResponse {
 
 #[derive(Debug, Error)]
 pub enum AuthError {
+    #[error("Twitch authorization was cancelled")]
+    Cancelled,
+    #[error("Twitch authorization attempt is invalid")]
+    InvalidAttempt,
     #[error("Twitch authorization is still pending")]
     Pending,
     #[error("Twitch authorization expired")]
@@ -305,19 +310,37 @@ impl<T: HttpTransport, S: TokenStore> AuthClient<T, S> {
     }
 
     pub async fn poll_device_login(&self, device_code: &str) -> Result<PollResult, AuthError> {
-        let response = self
-            .token_request(vec![
-                ("client_id".into(), self.client_id.clone()),
-                ("scopes".into(), self.scopes.join(" ")),
-                ("device_code".into(), device_code.into()),
-                (
-                    "grant_type".into(),
-                    "urn:ietf:params:oauth:grant-type:device_code".into(),
-                ),
-            ])
-            .await?;
+        self.poll_device_login_cancellable(device_code, &CancellationToken::new())
+            .await
+    }
+
+    pub async fn poll_device_login_cancellable(
+        &self,
+        device_code: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<PollResult, AuthError> {
+        let request = self.token_request(vec![
+            ("client_id".into(), self.client_id.clone()),
+            ("scopes".into(), self.scopes.join(" ")),
+            ("device_code".into(), device_code.into()),
+            (
+                "grant_type".into(),
+                "urn:ietf:params:oauth:grant-type:device_code".into(),
+            ),
+        ]);
+        let response = tokio::select! {
+            _ = cancellation.cancelled() => return Err(AuthError::Cancelled),
+            response = request => response?,
+        };
         if response.status == 200 {
+            if cancellation.is_cancelled() {
+                return Err(AuthError::Cancelled);
+            }
             self.persist_token_response(response).await?;
+            if cancellation.is_cancelled() {
+                self.store.delete().await?;
+                return Err(AuthError::Cancelled);
+            }
             return Ok(PollResult::Complete);
         }
         let message = serde_json::from_str::<OAuthErrorResponse>(&response.body)

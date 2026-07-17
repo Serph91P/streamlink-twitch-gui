@@ -382,6 +382,43 @@ textarea:focus-visible {
   background: transparent;
   cursor: pointer;
 }
+.auth-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+.auth-panel.state-panel {
+  display: grid;
+  align-items: start;
+}
+.auth-panel > p {
+  width: 100%;
+  margin: 0;
+}
+.auth-panel > button,
+.auth-actions button {
+  width: max-content;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--line);
+  color: var(--paper);
+  background: transparent;
+  cursor: pointer;
+}
+.auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.device-code {
+  width: max-content;
+  padding: 0.65rem 0.8rem;
+  color: var(--paper);
+  background: var(--input);
+  font-size: 1.2rem;
+  letter-spacing: 0.12em;
+}
 .search-form {
   max-width: 48rem;
   margin-bottom: 1.5rem;
@@ -452,6 +489,25 @@ textarea:focus-visible {
 }
 .settings-form .primary-action {
   justify-self: start;
+}
+.prerequisite-status > div {
+  padding: 0.8rem;
+  border-left: 3px solid var(--violet);
+  display: grid;
+  gap: 0.3rem;
+  background: var(--panel-raised);
+}
+.prerequisite-status span,
+.prerequisite-status p {
+  color: var(--muted);
+}
+.prerequisite-status button {
+  justify-self: start;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--line);
+  color: var(--paper);
+  background: transparent;
+  cursor: pointer;
 }
 .migration-preview button {
   justify-self: start;

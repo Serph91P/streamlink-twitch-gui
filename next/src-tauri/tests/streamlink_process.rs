@@ -120,6 +120,26 @@ fn bounded_wait_does_not_treat_logs_as_success_protocol() {
 }
 
 #[test]
+fn rejects_early_exit_with_sanitized_actionable_diagnostics() {
+    let playback = launch_playback(
+        &executable(),
+        arguments("https://fixture.invalid/fail?token=request-secret"),
+    )
+    .expect("fake playback must launch");
+
+    let error = playback.accept(Duration::from_secs(5)).unwrap_err();
+    let message = error.to_string();
+    assert!(message.contains("exited before playback started"));
+    assert!(message.contains("exit code 7"));
+    assert!(!message.contains("request-secret"));
+    assert!(!message.contains("process-secret"));
+    assert!(!message.contains("raw-output-secret"));
+    assert!(!message.contains("raw-query-secret"));
+    assert!(!message.contains("standalone-secret"));
+    assert!(!message.contains("cdn.example.test"));
+}
+
+#[test]
 fn executes_bounded_machine_readable_inspection() {
     let capabilities = inspect_streams(
         &executable(),
